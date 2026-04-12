@@ -1,0 +1,57 @@
+{
+  "name": "@jhizzard/engram",
+  "version": "0.1.0",
+  "description": "Persistent developer memory MCP server — the LLM is stateless, Engram isn't",
+  "license": "MIT",
+  "author": "Joshua Izzard <jhizzard@gmail.com>",
+  "homepage": "https://github.com/jhizzard/engram",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhizzard/engram.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jhizzard/engram/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "engram": "./dist/mcp-server/index.js"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/mcp-server/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "rag",
+    "claude",
+    "cursor",
+    "llm",
+    "supabase",
+    "pgvector",
+    "developer-tools"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@supabase/supabase-js": "^2.49.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.7.0"
+  }
+}
