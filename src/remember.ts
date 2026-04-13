@@ -11,22 +11,32 @@
 
 import { getSupabase } from './db.js';
 import { generateEmbedding, formatEmbedding } from './embeddings.js';
+import { stripPrivate } from './privacy.js';
 import type { RememberInput, RememberResult, SourceType } from './types.js';
 
 const DEDUP_SIMILARITY_THRESHOLD = 0.88;
 const DEDUP_EXACT_SKIP_THRESHOLD = 0.95;
 
 export async function memoryRemember(input: RememberInput): Promise<RememberResult> {
-  const content = input.content.trim();
-  if (!content) {
+  const rawContent = input.content.trim();
+  if (!rawContent) {
     console.error('[engram-store] empty content rejected');
+    return 'skipped';
+  }
+
+  // Strip <private>...</private> blocks BEFORE embedding or storage so
+  // no private content ever reaches OpenAI or Supabase.
+  const { text: content, hadPrivate } = stripPrivate(rawContent);
+  if (!content) {
+    console.error('[engram-store] content empty after redaction');
     return 'skipped';
   }
 
   const project = input.project || 'global';
   const sourceType: SourceType = input.source_type || 'fact';
   const category = input.category ?? null;
-  const metadata = input.metadata || {};
+  const metadata: Record<string, unknown> = { ...(input.metadata || {}) };
+  if (hadPrivate) metadata.had_private_content = true;
 
   const supabase = getSupabase();
   const embedding = await generateEmbedding(content);

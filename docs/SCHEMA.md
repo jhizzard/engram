@@ -62,6 +62,16 @@ The main retrieval function. RRF fusion of full-text + semantic search, then thr
 
 See `migrations/002_engram_search_function.sql` for the exact SQL. The function is `STABLE` and has no side effects, so it's safe to call from RLS-restricted contexts if you add policies later.
 
+## Three-layer progressive-disclosure tools
+
+`memory_hybrid_search` is the workhorse, but most callers don't want to pull full rows for every hit — that's wasteful when you only need snippets to decide which memories to drill into. Engram ships three layered tools that share one shape vocabulary:
+
+- `memory_index(query, project?, source_type?, limit?)` — projection of `memory_hybrid_search` into a compact `IndexHit = { id, snippet≤120, source_type, project, created_at }`. About 80–120 tokens per hit. Use first.
+- `memory_timeline({ query? | around_id? }, window: '1h'|'24h'|'7d')` — same compact `IndexHit` shape, but rows come from a plain `memory_items` filter in the same project, chronologically surrounding either the top hit of `query` or an explicit UUID. Radius defaults to ±10 rows.
+- `memory_get({ ids: uuid[] })` — batch fetch of full `memory_items` rows by UUID (1–100 per call). Batch-only to discourage N+1 callers. The HTTP counterpart is `GET /observation/:id`, which returns the same shape for a single ID (the citation endpoint).
+
+These are additive to `memory_recall` and `memory_search` — nothing changes about the SQL schema.
+
 ## Why these shapes
 
 - **vector(1536), not 3072.** OpenAI's `text-embedding-3-large` defaults to 3072 dimensions, but supports a `dimensions` parameter to truncate. 1536 is the sweet spot — half the storage, almost identical recall quality, fits comfortably in HNSW indexes for stores into the millions.

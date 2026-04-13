@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Engram MCP Server
+ * Engram CLI entry point
  *
- * Exposes six stdio MCP tools:
- *   memory_remember          — store a fact/decision/preference
- *   memory_recall            — smart retrieval (applies Fix 2 min_results)
- *   memory_search            — low-level filtered search
- *   memory_forget            — soft-delete by ID
- *   memory_status            — system stats
- *   memory_summarize_session — extract facts from text via Haiku
+ * Default (no args): starts the stdio MCP server with six tools:
+ *   memory_remember, memory_recall, memory_search, memory_forget,
+ *   memory_status, memory_summarize_session.
+ *
+ * `engram serve`: starts the HTTP webhook server (src/webhook-server.ts)
+ * instead of the MCP stdio server. The two are additive — existing MCP
+ * clients are unaffected.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -24,7 +24,43 @@ import {
   memoryStatus,
   formatStatus,
   memorySummarizeSession,
+  memoryIndex,
+  memoryTimeline,
+  memoryGet,
 } from '../src/index.js';
+import { startWebhookServer } from '../src/webhook-server.js';
+import { exportMemories, importMemories } from '../src/export-import.js';
+
+const subcommand = process.argv[2];
+
+function parseFlag(args: string[], name: string): string | undefined {
+  const prefix = `--${name}`;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === prefix) return args[i + 1];
+    if (a.startsWith(`${prefix}=`)) return a.slice(prefix.length + 1);
+  }
+  return undefined;
+}
+
+if (subcommand === 'serve') {
+  startWebhookServer();
+} else if (subcommand === 'export') {
+  const rest = process.argv.slice(3);
+  const project = parseFlag(rest, 'project');
+  const since = parseFlag(rest, 'since');
+  const report = await exportMemories({ project, since, out: process.stdout });
+  process.stderr.write(`[engram-export] wrote ${report.rows} rows\n`);
+} else if (subcommand === 'import') {
+  const report = await importMemories({ in: process.stdin });
+  process.stderr.write(
+    `[engram-import] processed=${report.processed} inserted=${report.inserted} skipped=${report.skipped} errors=${report.errors}\n`
+  );
+} else {
+  await startMcpStdio();
+}
+
+async function startMcpStdio(): Promise<void> {
 
 const server = new McpServer({
   name: 'engram',
@@ -256,8 +292,112 @@ server.registerTool(
   }
 );
 
+// ── memory_index ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  'memory_index',
+  {
+    title: 'Memory Index',
+    description:
+      'Three-layer search — step 1. Returns a compact index of matching memories (≤120-char snippet, source_type, project, created_at). Use this first; drill into IDs with memory_get, or surround with memory_timeline. Much cheaper in tokens than memory_recall.',
+    inputSchema: {
+      query: z.string().describe('Search query'),
+      project: z.string().optional().describe('Filter by project'),
+      source_type: z
+        .enum(['fact', 'decision', 'preference', 'bug_fix', 'architecture', 'code_context'])
+        .optional()
+        .describe('Filter by source type'),
+      limit: z.number().default(20).describe('Max results'),
+    },
+  },
+  async ({ query, project, source_type, limit }) => {
+    try {
+      const hits = await memoryIndex({
+        query,
+        project: project ?? null,
+        source_type: source_type ?? null,
+        limit: limit || 20,
+      });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }] };
+    } catch (err) {
+      console.error('[engram-mcp] memory_index failed:', err);
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+      };
+    }
+  }
+);
+
+// ── memory_timeline ──────────────────────────────────────────────────────
+
+server.registerTool(
+  'memory_timeline',
+  {
+    title: 'Memory Timeline',
+    description:
+      'Three-layer search — step 2. Returns memories from the same project chronologically surrounding either a query hit or a specific observation ID. Compact shape matches memory_index. Use after memory_index when you want temporal context.',
+    inputSchema: {
+      query: z.string().optional().describe('Query to locate the anchor memory (optional)'),
+      around_id: z
+        .string()
+        .uuid()
+        .optional()
+        .describe('Anchor by an explicit memory UUID (optional)'),
+      window: z
+        .enum(['1h', '24h', '7d'])
+        .default('24h')
+        .describe('Time window around the anchor'),
+    },
+  },
+  async ({ query, around_id, window }) => {
+    try {
+      const hits = await memoryTimeline({
+        query,
+        around_id,
+        window: window || '24h',
+      });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }] };
+    } catch (err) {
+      console.error('[engram-mcp] memory_timeline failed:', err);
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+      };
+    }
+  }
+);
+
+// ── memory_get ───────────────────────────────────────────────────────────
+
+server.registerTool(
+  'memory_get',
+  {
+    title: 'Memory Get (batch)',
+    description:
+      'Three-layer search — step 3. Batch-fetch full memory rows by UUID. Pass the IDs returned by memory_index or memory_timeline. Batch-only (up to 100 IDs) to discourage N+1 calls.',
+    inputSchema: {
+      ids: z
+        .array(z.string().uuid())
+        .min(1)
+        .max(100)
+        .describe('Array of memory UUIDs to fetch (1–100)'),
+    },
+  },
+  async ({ ids }) => {
+    try {
+      const rows = await memoryGet({ ids });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(rows, null, 2) }] };
+    } catch (err) {
+      console.error('[engram-mcp] memory_get failed:', err);
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+      };
+    }
+  }
+);
+
 // ── Start Server ─────────────────────────────────────────────────────────
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error('[engram-mcp] engram MCP server listening on stdio');
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('[engram-mcp] engram MCP server listening on stdio');
+}

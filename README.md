@@ -2,7 +2,7 @@
 
 **The LLM is stateless. Engram isn't.**
 
-Engram is a persistent developer-memory MCP server. It gives Claude Code, Cursor, Windsurf, Cline, Continue, and any other Model Context Protocol client a long-term memory backed by Postgres + pgvector (Supabase by default). Six tools — `memory_remember`, `memory_recall`, `memory_search`, `memory_forget`, `memory_status`, `memory_summarize_session` — let your assistant store decisions, recall them across sessions, and surface the right context when you start a new conversation.
+Engram is a persistent developer-memory MCP server. It gives Claude Code, Cursor, Windsurf, Cline, Continue, and any other Model Context Protocol client a long-term memory backed by Postgres + pgvector (Supabase by default). Nine MCP tools — `memory_remember`, `memory_recall`, `memory_search`, `memory_forget`, `memory_status`, `memory_summarize_session`, plus the three-layer progressive-disclosure set `memory_index` / `memory_timeline` / `memory_get` — let your assistant store decisions, recall them across sessions, and surface the right context when you start a new conversation. An optional HTTP webhook server (`engram serve`) exposes the same operations to non-MCP clients.
 
 ---
 
@@ -140,6 +140,50 @@ Engram speaks the standard stdio MCP transport. Any client that lets you point a
 | `memory_forget` | Soft-delete a memory by UUID. The row is archived, not destroyed. |
 | `memory_status` | Stats: total active memories, sessions processed, breakdown by project / source_type / category. |
 | `memory_summarize_session` | Pass in a session transcript or document; Engram extracts discrete facts via Haiku and stores each as a memory. |
+| `memory_index` | Three-layer search step 1. Compact `{id, snippet≤120, source_type, project, created_at}` hits (~80–120 tokens each). Drill into IDs with `memory_get`, or surround with `memory_timeline`. |
+| `memory_timeline` | Three-layer search step 2. Memories from the same project chronologically surrounding either a query hit or a specific observation ID. Windows: `1h` / `24h` / `7d`. |
+| `memory_get` | Three-layer search step 3. Batch-fetch full rows by UUID (1–100 IDs). Batch-only to discourage N+1 calls. |
+
+### Three-layer progressive disclosure
+
+The `memory_index` → `memory_timeline` → `memory_get` trio is designed for token-efficient retrieval. Start with `memory_index` to get a cheap overview, use `memory_timeline` when you need temporal context around a hit, and only call `memory_get` once you know which full rows you actually want. This matches the `search` / `timeline` / `get_observations` shape from `claude-mem`.
+
+### HTTP webhook server (non-MCP clients)
+
+Run `engram serve` to start a tiny HTTP surface on `ENGRAM_WEBHOOK_PORT` (default `37778`). It exposes the same operations as the MCP tools over JSON:
+
+- `POST /engram` with body `{ "op": "remember" | "recall" | "search" | "status" | "index" | "timeline" | "get", ...args }`.
+- `GET  /healthz` — returns `{ ok, version, store: { rows, last_write } }`.
+- `GET  /observation/:id` — single memory by UUID (the citation endpoint). Same shape as a `memory_get` row.
+
+The MCP stdio server is unaffected — `engram` with no subcommand still starts it.
+
+### CLI subcommands
+
+| Command | What it does |
+|---|---|
+| `engram` | Start the stdio MCP server (default — backwards compatible). |
+| `engram serve` | Start the HTTP webhook server on `$ENGRAM_WEBHOOK_PORT` (default 37778). |
+| `engram export --project <name> --since <iso>` | Stream every matching memory as JSONL on stdout. Paginated, never loads the full store into memory. Include embeddings so re-imports don't re-embed. |
+| `engram import` | Read JSONL from stdin. Skips rows whose `id` already exists, embeds rows that are missing an `embedding`, preserves `id`/`created_at`/`updated_at`/`is_active`/`archived`/`superseded_by` when present. |
+
+Export/import is the migration path out of (or into) Engram:
+
+```bash
+engram export --project termdeck > termdeck-backup.jsonl
+engram import < termdeck-backup.jsonl
+```
+
+### Configuring `memory_hybrid_search`
+
+Starting in 0.2.0, `memory_hybrid_search` caps `match_count` at 200 by default so a single call cannot pull tens of thousands of rows. Override per-database or per-session:
+
+```sql
+ALTER DATABASE your_db SET engram.max_match_count = 500;
+SET engram.max_match_count = 500;
+```
+
+`memory_hybrid_search_explain(...)` is a sibling function that returns `EXPLAIN (ANALYZE, BUFFERS)` output for the equivalent call. Use it when diagnosing slow recall on very large stores.
 
 ---
 

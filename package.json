@@ -28,6 +28,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.tests.json && node --test 'dist-tests/tests/**/*.test.js'",
     "start": "node dist/mcp-server/index.js"
   },
   "keywords": [

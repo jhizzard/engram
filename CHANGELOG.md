@@ -7,9 +7,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Planned
-- HTTP event webhook server (Fix 6 second half) so TermDeck and similar tools can POST real-time events without spawning a new MCP child per call
-- `memory_export` / `memory_import` CLI subcommands for backups and cross-database migration
-- A `match_count` cap and EXPLAIN-friendly variant of `memory_hybrid_search` for very large stores
+- Web viewer UI for browsing memories (port 37777), matching the shape `claude-mem` ships.
+- Claude Code lifecycle-hooks capture path — auto-ingest tool usage without a client call.
+
+## [0.2.0] - 2026-04-13
+
+### Added
+- **HTTP webhook server** (`engram serve`). A tiny `node:http` surface on `ENGRAM_WEBHOOK_PORT` (default `37778`) exposing:
+  - `POST /engram` with `{ op, ...args }` for `remember` / `recall` / `search` / `status` / `index` / `timeline` / `get`.
+  - `GET /healthz` — liveness plus `{ version, store: { rows, last_write } }`.
+  - `GET /observation/:id` — single memory by UUID, same row shape as `memory_get` (the citation endpoint).
+  The MCP stdio server keeps working unchanged; the two are additive. Graceful shutdown on SIGTERM/SIGINT. Implemented in `src/webhook-server.ts` with a testable `dispatchOp()` that takes injectable deps.
+- **Three-layer progressive-disclosure search**: `memory_index` / `memory_timeline` / `memory_get`. Exposed both as MCP tools and through the webhook server. `memory_index` returns a compact 80–120-token shape (`{id, snippet≤120, source_type, project, created_at}`); `memory_timeline` returns the same compact shape chronologically surrounding either a query hit or an explicit UUID with windows `1h`/`24h`/`7d`; `memory_get` batch-fetches full rows (1–100 UUIDs per call) and shares its row shape with `GET /observation/:id`. Implemented in `src/layered.ts`.
+- **Privacy tags.** `memory_remember` now strips `<private>…</private>` blocks from content before embedding, dedup, and insert, replacing each block with `[redacted]`. Rows that had any redaction get `metadata.had_private_content = true`. Handles nested tags (collapse to one outer block), unclosed tags (preserved verbatim — fail-safe, never leak), case-insensitive tag matching, and attributes on the opening tag. The consolidation job re-applies the redactor defensively to every cluster member and to the canonical output so legacy rows are covered. Implemented in `src/privacy.ts`; documented in `docs/SOURCE-TYPES.md`.
+- **`engram export` / `engram import` CLI.** Streaming JSONL dump and load with no in-memory accumulation.
+  - `engram export --project <name> --since <iso>` paginates through `memory_items` 500 rows at a time and writes one JSON object per line to stdout, including the `embedding` column so re-imports don't need to re-embed.
+  - `engram import < dump.jsonl` reads stdin line-by-line, skips existing IDs, computes missing embeddings, and inserts. Preserves `id`, `created_at`, `updated_at`, `is_active`, `archived`, `superseded_by` when present. Implemented in `src/export-import.ts`.
+- **`match_count` cap on `memory_hybrid_search`.** Default cap 200, configurable via a PG setting: `SET engram.max_match_count = 500` (per-session) or `ALTER DATABASE … SET engram.max_match_count = 500` (persistent). The function was previously unbounded.
+- **`memory_hybrid_search_explain`.** New SQL function returning `EXPLAIN (ANALYZE, BUFFERS)` output for the equivalent `memory_hybrid_search` call. Used by admin tooling (`engram diagnose`) to debug slow recall queries on large stores.
+- **Unit test infrastructure.** New `tsconfig.tests.json` + `npm test` script (`tsc -p tsconfig.tests.json && node --test 'dist-tests/tests/**/*.test.js'`). 21 `node:test` cases across webhook dispatch, three-layer round-trip, privacy redaction edge cases, and error handling. No new runtime dependencies — `node:http`, `node:readline`, and `node:test` are built in.
+
+### Changed
+- `memory_get` now SELECTs an explicit column list (no `embedding`) so its row shape exactly matches `GET /observation/:id`. Embeddings were never useful for citation callers and inflated responses by ~6 KB each.
+- `README.md` tool reference table updated to list all nine MCP tools and the new HTTP surface.
+- `migrations/003_engram_event_webhook.sql` stays as a placeholder — the webhook implementation lives in-process (`src/webhook-server.ts`), not in SQL. `migrations/004_engram_match_count_cap_and_explain.sql` is the new file.
 
 ## [0.1.0] - 2026-04-11
 
@@ -30,5 +51,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Fix 5 — Project affinity scoring.** Exact project match multiplies score by 1.5x, the special `global` project by 1.0x, and unrelated projects by 0.7x. Implemented in `migrations/002_engram_search_function.sql`.
 - **Fix 6 — Real-time event ingestion path documented.** `migrations/003_engram_event_webhook.sql` is a placeholder marker; the live ingestion endpoint will live in the MCP server process. Documented in `docs/RAG-FIXES-APPLIED.md`.
 
-[Unreleased]: https://github.com/jhizzard/engram/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jhizzard/engram/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jhizzard/engram/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jhizzard/engram/releases/tag/v0.1.0

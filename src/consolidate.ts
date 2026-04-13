@@ -14,6 +14,7 @@
 
 import { getSupabase } from './db.js';
 import { generateEmbedding, formatEmbedding } from './embeddings.js';
+import { stripPrivate } from './privacy.js';
 
 const CLUSTER_SIMILARITY = 0.85;
 const MAX_CLUSTER_SIZE = 6;
@@ -47,7 +48,12 @@ async function synthesizeCanonical(cluster: MemoryRow[]): Promise<string | null>
   const client = new Anthropic({ apiKey });
   const model = process.env.ENGRAM_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
 
-  const listing = cluster.map((m, i) => `[${i + 1}] ${m.content}`).join('\n');
+  // Defensive: strip <private>...</private> from every cluster member
+  // before sending to the LLM. New rows are redacted at write time in
+  // memory_remember, but legacy rows may still contain raw private blocks.
+  const listing = cluster
+    .map((m, i) => `[${i + 1}] ${stripPrivate(m.content).text}`)
+    .join('\n');
 
   try {
     const response = await client.messages.create({
@@ -141,12 +147,16 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
 
     report.clusters_found++;
 
-    const canonical = await synthesizeCanonical(cluster);
-    if (!canonical) {
+    const rawCanonical = await synthesizeCanonical(cluster);
+    if (!rawCanonical) {
       report.errors++;
       cluster.forEach((m) => visited.add(m.id));
       continue;
     }
+
+    // Defensive: redact any private block the model may have echoed back.
+    const { text: canonical, hadPrivate: canonicalHadPrivate } = stripPrivate(rawCanonical);
+    const clusterHadPrivate = cluster.some((m) => stripPrivate(m.content).hadPrivate);
 
     let canonicalEmbedding: number[];
     try {
@@ -169,6 +179,9 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
           ...seed.metadata,
           consolidated_from: cluster.map((m) => m.id),
           consolidated_at: new Date().toISOString(),
+          ...(canonicalHadPrivate || clusterHadPrivate
+            ? { had_private_content: true }
+            : {}),
         },
       })
       .select('id')

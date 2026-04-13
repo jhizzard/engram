@@ -38,3 +38,22 @@ If you're not sure, `fact` is a safe default.
 Long-running engineering work has a strange property: the most important things are usually the oldest. The decision to use Postgres over DynamoDB matters every day. The bug you fixed yesterday matters this week and then never again. A flat 30-day decay (Engram's predecessor used one) crushes both into the same score and drowns the important stuff.
 
 The tiered profile fixes this. Decisions and architecture barely move over a year. Bug fixes fade fast so the recall window stays focused on actually-current issues. Code context fades fastest of all because it's the most local — by next week you'll be in a different file anyway.
+
+## Privacy
+
+Memories can contain `<private>…</private>` blocks that must never leave the caller's machine. Engram redacts them at the earliest possible point:
+
+- `memory_remember` runs `stripPrivate()` on the incoming text **before** embedding, before dedup, and before insert. Every `<private>…</private>` block is replaced with the literal string `[redacted]`.
+- The embedding is computed from the redacted text. No private content is ever sent to OpenAI.
+- If anything was redacted, the row is tagged with `metadata.had_private_content = true` so admin tooling can find redacted memories without reading content.
+- The consolidation job (`consolidateMemories`) re-applies `stripPrivate()` defensively to every cluster member before handing them to Claude Haiku, and to the canonical output before inserting it. Legacy rows created before this feature shipped are therefore also safe during consolidation.
+
+Edge cases covered by unit tests (`tests/privacy.test.ts`):
+
+- **Nested tags** (`<private>outer <private>inner</private> tail</private>`) collapse to a single outer `[redacted]`.
+- **Unclosed tags** (`use <private> data …`) are treated as literal text — Engram never silently swallows trailing content if the block doesn't close. This is a safety choice: a typo shouldn't cost you a memory, and an unclosed block still can't leak through because it never matches the redactor.
+- **Case insensitivity** — `<PRIVATE>`, `<Private>`, `</private >` all match.
+- **Tag attributes** — `<private data-owner="josh">secret</private>` matches.
+- **Multi-line blocks** — spanning any number of newlines.
+
+If redaction would leave the memory empty, `memory_remember` logs an error and returns `skipped` rather than storing a bare `[redacted]`.
