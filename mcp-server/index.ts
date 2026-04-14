@@ -43,7 +43,45 @@ function parseFlag(args: string[], name: string): string | undefined {
   return undefined;
 }
 
-if (subcommand === 'serve') {
+const HELP_TEXT = `engram — persistent developer memory (MCP + HTTP)
+
+Usage:
+  engram                    Start the stdio MCP server (default; backwards compatible)
+  engram serve              Start the HTTP webhook server on $ENGRAM_WEBHOOK_PORT (default 37778)
+  engram export [opts]      Stream memory rows as JSONL to stdout
+                              --project <name>   only this project
+                              --since <ISO-8601> only rows updated on/after timestamp
+  engram import             Read JSONL from stdin; skip existing IDs, embed missing
+  engram --help             Show this message
+  engram --version          Print package version
+
+Environment:
+  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   required for all operations
+  OPENAI_API_KEY                             required for embeddings (remember/recall/index/search)
+  ENGRAM_WEBHOOK_PORT                        HTTP port for \`engram serve\` (default 37778)
+
+Docs: https://github.com/jhizzard/engram
+`;
+
+if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
+  process.stdout.write(HELP_TEXT);
+  process.exit(0);
+} else if (subcommand === '--version' || subcommand === '-v') {
+  // Read version lazily so the CLI doesn't crash if package.json is missing in dev.
+  try {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    process.stdout.write(`${pkg.version}\n`);
+  } catch {
+    process.stdout.write('unknown\n');
+  }
+  process.exit(0);
+} else if (subcommand === 'serve') {
   startWebhookServer();
 } else if (subcommand === 'export') {
   const rest = process.argv.slice(3);
@@ -64,7 +102,7 @@ async function startMcpStdio(): Promise<void> {
 
 const server = new McpServer({
   name: 'engram',
-  version: '0.1.0',
+  version: '0.2.0',
 });
 
 // ── memory_remember ──────────────────────────────────────────────────────

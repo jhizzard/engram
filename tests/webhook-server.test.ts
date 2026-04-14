@@ -6,8 +6,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
 
-import { dispatchOp, type OpDeps } from '../src/webhook-server.js';
+import { dispatchOp, startWebhookServer, type OpDeps } from '../src/webhook-server.js';
 import type { RecallOutput } from '../src/recall.js';
 import type { RecallHit, StatusReport } from '../src/types.js';
 
@@ -128,6 +129,28 @@ test('dispatchOp rejects unknown op', async () => {
 test('dispatchOp recall requires question or query', async () => {
   const result = await dispatchOp({ op: 'recall' }, mockDeps());
   assert.equal(result.status, 400);
+});
+
+test('POST /engram with malformed JSON returns 400, not 500', async () => {
+  const server = startWebhookServer({ port: 0, deps: mockDeps() });
+  await new Promise<void>((resolve) => {
+    if (server.listening) resolve();
+    else server.once('listening', () => resolve());
+  });
+  try {
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(`http://127.0.0.1:${port}/engram`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not json',
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { ok: boolean; error: string };
+    assert.equal(body.ok, false);
+    assert.match(body.error, /invalid JSON/i);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('dispatchOp wraps thrown errors as 500', async () => {

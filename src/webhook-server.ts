@@ -170,12 +170,29 @@ export async function dispatchOp(
   }
 }
 
+/**
+ * Tagged error for HTTP semantics — the outer request handler inspects
+ * `httpStatus` to decide the response code. Malformed JSON is a client
+ * error (400), not a server error (500).
+ */
+class HttpError extends Error {
+  httpStatus: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.httpStatus = status;
+  }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw) return {};
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, 'invalid JSON body');
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -279,9 +296,11 @@ export function startWebhookServer(opts: WebhookServerOptions = {}): Server {
 
       sendJson(res, 404, { ok: false, error: 'not found' });
     } catch (err) {
-      console.error('[engram-webhook] handler error:', err);
+      const status =
+        err instanceof HttpError ? err.httpStatus : (err as { httpStatus?: number }).httpStatus ?? 500;
+      if (status >= 500) console.error('[engram-webhook] handler error:', err);
       if (!res.headersSent) {
-        sendJson(res, 500, { ok: false, error: (err as Error).message });
+        sendJson(res, status, { ok: false, error: (err as Error).message });
       }
     }
   });
