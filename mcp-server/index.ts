@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Mnemos CLI entry point
+ * Mnestra CLI entry point
  *
  * Default (no args): starts the stdio MCP server with six tools:
  *   memory_remember, memory_recall, memory_search, memory_forget,
  *   memory_status, memory_summarize_session.
  *
- * `mnemos serve`: starts the HTTP webhook server (src/webhook-server.ts)
+ * `mnestra serve`: starts the HTTP webhook server (src/webhook-server.ts)
  * instead of the MCP stdio server. The two are additive — existing MCP
  * clients are unaffected.
  */
@@ -43,24 +43,24 @@ function parseFlag(args: string[], name: string): string | undefined {
   return undefined;
 }
 
-const HELP_TEXT = `mnemos — persistent developer memory (MCP + HTTP)
+const HELP_TEXT = `mnestra — persistent developer memory (MCP + HTTP)
 
 Usage:
-  mnemos                    Start the stdio MCP server (default; backwards compatible)
-  mnemos serve              Start the HTTP webhook server on $MNEMOS_WEBHOOK_PORT (default 37778)
-  mnemos export [opts]      Stream memory rows as JSONL to stdout
+  mnestra                    Start the stdio MCP server (default; backwards compatible)
+  mnestra serve              Start the HTTP webhook server on $MNESTRA_WEBHOOK_PORT (default 37778)
+  mnestra export [opts]      Stream memory rows as JSONL to stdout
                               --project <name>   only this project
                               --since <ISO-8601> only rows updated on/after timestamp
-  mnemos import             Read JSONL from stdin; skip existing IDs, embed missing
-  mnemos --help             Show this message
-  mnemos --version          Print package version
+  mnestra import             Read JSONL from stdin; skip existing IDs, embed missing
+  mnestra --help             Show this message
+  mnestra --version          Print package version
 
 Environment:
   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   required for all operations
   OPENAI_API_KEY                             required for embeddings (remember/recall/index/search)
-  MNEMOS_WEBHOOK_PORT                        HTTP port for \`mnemos serve\` (default 37778)
+  MNESTRA_WEBHOOK_PORT                        HTTP port for \`mnestra serve\` (default 37778)
 
-Docs: https://github.com/jhizzard/mnemos
+Docs: https://github.com/jhizzard/mnestra
 `;
 
 if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
@@ -88,11 +88,11 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
   const project = parseFlag(rest, 'project');
   const since = parseFlag(rest, 'since');
   const report = await exportMemories({ project, since, out: process.stdout });
-  process.stderr.write(`[mnemos-export] wrote ${report.rows} rows\n`);
+  process.stderr.write(`[mnestra-export] wrote ${report.rows} rows\n`);
 } else if (subcommand === 'import') {
   const report = await importMemories({ in: process.stdin });
   process.stderr.write(
-    `[mnemos-import] processed=${report.processed} inserted=${report.inserted} skipped=${report.skipped} errors=${report.errors}\n`
+    `[mnestra-import] processed=${report.processed} inserted=${report.inserted} skipped=${report.skipped} errors=${report.errors}\n`
   );
 } else {
   await startMcpStdio();
@@ -101,7 +101,7 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
 async function startMcpStdio(): Promise<void> {
 
 const server = new McpServer({
-  name: 'mnemos',
+  name: 'mnestra',
   version: '0.2.0',
 });
 
@@ -151,7 +151,7 @@ server.registerTool(
         ],
       };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_remember failed:', err);
+      console.error('[mnestra-mcp] memory_remember failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -195,7 +195,7 @@ server.registerTool(
       });
       return { content: [{ type: 'text' as const, text: out.text }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_recall failed:', err);
+      console.error('[mnestra-mcp] memory_recall failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -233,7 +233,7 @@ server.registerTool(
         content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }],
       };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_search failed:', err);
+      console.error('[mnestra-mcp] memory_search failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -260,7 +260,7 @@ server.registerTool(
       }
       return { content: [{ type: 'text' as const, text: `Memory ${memoryId} archived.` }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_forget failed:', err);
+      console.error('[mnestra-mcp] memory_forget failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -283,7 +283,7 @@ server.registerTool(
       const report = await memoryStatus();
       return { content: [{ type: 'text' as const, text: formatStatus(report) }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_status failed:', err);
+      console.error('[mnestra-mcp] memory_status failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -322,7 +322,7 @@ server.registerTool(
         ],
       };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_summarize_session failed:', err);
+      console.error('[mnestra-mcp] memory_summarize_session failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -358,7 +358,7 @@ server.registerTool(
       });
       return { content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_index failed:', err);
+      console.error('[mnestra-mcp] memory_index failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -396,7 +396,7 @@ server.registerTool(
       });
       return { content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_timeline failed:', err);
+      console.error('[mnestra-mcp] memory_timeline failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -425,7 +425,7 @@ server.registerTool(
       const rows = await memoryGet({ ids });
       return { content: [{ type: 'text' as const, text: JSON.stringify(rows, null, 2) }] };
     } catch (err) {
-      console.error('[mnemos-mcp] memory_get failed:', err);
+      console.error('[mnestra-mcp] memory_get failed:', err);
       return {
         content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
       };
@@ -437,5 +437,5 @@ server.registerTool(
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[mnemos-mcp] mnemos MCP server listening on stdio');
+  console.error('[mnestra-mcp] mnestra MCP server listening on stdio');
 }

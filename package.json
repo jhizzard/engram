@@ -1,22 +1,22 @@
 {
-  "name": "@jhizzard/mnemos",
+  "name": "@jhizzard/mnestra",
   "version": "0.2.0",
-  "description": "Persistent developer memory MCP server — the LLM is stateless, Mnemos isn't",
+  "description": "Persistent developer memory MCP server — the LLM is stateless, Mnestra isn't",
   "license": "MIT",
   "author": "Joshua Izzard <jhizzard@gmail.com>",
-  "homepage": "https://github.com/jhizzard/mnemos",
+  "homepage": "https://github.com/jhizzard/mnestra",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jhizzard/mnemos.git"
+    "url": "https://github.com/jhizzard/mnestra.git"
   },
   "bugs": {
-    "url": "https://github.com/jhizzard/mnemos/issues"
+    "url": "https://github.com/jhizzard/mnestra/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "mnemos": "./dist/mcp-server/index.js"
+    "mnestra": "./dist/mcp-server/index.js"
   },
   "files": [
     "dist",

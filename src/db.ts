@@ -1,5 +1,5 @@
 /**
- * Mnemos — Supabase client factory
+ * Mnestra — Supabase client factory
  *
  * Reads credentials from environment variables only. Never hardcode URLs
  * or keys in this file — if your deployment needs them baked in, pass them
@@ -18,9 +18,9 @@ export function getSupabase(): SupabaseClient {
 
   if (!url || !key) {
     console.error(
-      '[mnemos] missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — set them in your MCP client env'
+      '[mnestra] missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — set them in your MCP client env'
     );
-    throw new Error('Mnemos: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+    throw new Error('Mnestra: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   }
 
   cached = createClient(url, key, {

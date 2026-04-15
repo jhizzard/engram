@@ -1,5 +1,5 @@
 /**
- * Mnemos — core type definitions
+ * Mnestra — core type definitions
  */
 
 export type SourceType =

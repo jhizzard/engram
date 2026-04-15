@@ -1,6 +1,6 @@
-# Integrating Mnemos
+# Integrating Mnestra
 
-Mnemos is designed to be embedded. The MCP server is the most common entry point, but the same code is published as a programmatic library so you can call it from your own tools.
+Mnestra is designed to be embedded. The MCP server is the most common entry point, but the same code is published as a programmatic library so you can call it from your own tools.
 
 ## With TermDeck
 
@@ -14,14 +14,14 @@ There are two ways to wire it up:
 
 ### Option A — TermDeck as an MCP client
 
-TermDeck spawns Mnemos as a child stdio MCP process and calls the tools directly. This is the cleanest separation: Mnemos doesn't know TermDeck exists.
+TermDeck spawns Mnestra as a child stdio MCP process and calls the tools directly. This is the cleanest separation: Mnestra doesn't know TermDeck exists.
 
-### Option B — TermDeck imports Mnemos as a library
+### Option B — TermDeck imports Mnestra as a library
 
-TermDeck adds `@jhizzard/mnemos` as a dependency and calls the functions directly:
+TermDeck adds `@jhizzard/mnestra` as a dependency and calls the functions directly:
 
 ```ts
-import { memoryRemember, memoryRecall } from '@jhizzard/mnemos';
+import { memoryRemember, memoryRecall } from '@jhizzard/mnestra';
 
 await memoryRemember({
   content: 'Server started on port 8080',
@@ -35,13 +35,13 @@ This avoids the per-call subprocess overhead and is the recommended path for too
 
 ## With Rumen
 
-[Rumen](https://github.com/jhizzard/rumen) is an async learning layer that reads from any pgvector memory store and writes insights back. To run Rumen on top of Mnemos:
+[Rumen](https://github.com/jhizzard/rumen) is an async learning layer that reads from any pgvector memory store and writes insights back. To run Rumen on top of Mnestra:
 
-1. Apply the Mnemos migrations to your Postgres instance.
+1. Apply the Mnestra migrations to your Postgres instance.
 2. Apply the Rumen migrations to the same instance — Rumen creates its own `rumen_*` tables and never touches `memory_items`.
-3. Point Rumen at the same `SUPABASE_URL` you gave Mnemos.
+3. Point Rumen at the same `SUPABASE_URL` you gave Mnestra.
 
-Rumen reads via `memory_hybrid_search` (the SQL function Mnemos already exposes) and writes to `rumen_insights`. There is no Mnemos code change required.
+Rumen reads via `memory_hybrid_search` (the SQL function Mnestra already exposes) and writes to `rumen_insights`. There is no Mnestra code change required.
 
 ## With your own client
 
@@ -56,7 +56,7 @@ import {
   memoryStatus,
   memorySummarizeSession,
   consolidateMemories,
-} from '@jhizzard/mnemos';
+} from '@jhizzard/mnestra';
 ```
 
 Every function reads its credentials from environment variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, optionally `ANTHROPIC_API_KEY`). Set them once at process start and the cached Supabase client handles the rest.
@@ -66,10 +66,10 @@ Every function reads its credentials from environment variables (`SUPABASE_URL`,
 `consolidateMemories()` is the Fix 4 background job. Run it weekly via cron, GitHub Actions, or a Supabase scheduled function:
 
 ```ts
-import { consolidateMemories } from '@jhizzard/mnemos';
+import { consolidateMemories } from '@jhizzard/mnestra';
 
 const report = await consolidateMemories();
-console.log(`[mnemos-consolidate] merged ${report.clusters_merged} clusters, superseded ${report.memories_superseded} memories`);
+console.log(`[mnestra-consolidate] merged ${report.clusters_merged} clusters, superseded ${report.memories_superseded} memories`);
 ```
 
 It is non-destructive: originals are marked `is_active = false` with `superseded_by` pointing to the canonical replacement. You can revert any merge by clearing those columns.

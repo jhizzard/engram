@@ -1,5 +1,5 @@
 /**
- * Mnemos — layered tools unit tests
+ * Mnestra — layered tools unit tests
  *
  * Drives dispatchOp() with mocked deps for the three-layer search surface
  * (memory_index → memory_timeline → memory_get).

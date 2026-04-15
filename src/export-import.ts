@@ -1,8 +1,8 @@
 /**
- * Mnemos — export / import
+ * Mnestra — export / import
  *
  * Streaming JSONL dump and load. Designed as the migration path out of
- * (or into) Mnemos: one row per line, full column set minus nothing,
+ * (or into) Mnestra: one row per line, full column set minus nothing,
  * resumable by re-importing into a fresh database.
  *
  * Neither function loads the whole store into memory. Export paginates
@@ -110,13 +110,13 @@ export async function importMemories(opts: ImportOptions): Promise<ImportReport>
     try {
       row = JSON.parse(trimmed) as RawRow;
     } catch (err) {
-      console.error('[mnemos-import] bad JSON line:', (err as Error).message);
+      console.error('[mnestra-import] bad JSON line:', (err as Error).message);
       report.errors++;
       continue;
     }
 
     if (!row.content || typeof row.content !== 'string') {
-      console.error('[mnemos-import] row missing content, skipping');
+      console.error('[mnestra-import] row missing content, skipping');
       report.errors++;
       continue;
     }
@@ -129,7 +129,7 @@ export async function importMemories(opts: ImportOptions): Promise<ImportReport>
         .eq('id', row.id)
         .maybeSingle();
       if (checkErr) {
-        console.error('[mnemos-import] id check failed:', checkErr.message);
+        console.error('[mnestra-import] id check failed:', checkErr.message);
         report.errors++;
         continue;
       }
@@ -146,7 +146,7 @@ export async function importMemories(opts: ImportOptions): Promise<ImportReport>
         const vec = await generateEmbedding(row.content);
         embedding = formatEmbedding(vec);
       } catch (err) {
-        console.error('[mnemos-import] embed failed:', (err as Error).message);
+        console.error('[mnestra-import] embed failed:', (err as Error).message);
         report.errors++;
         continue;
       }
@@ -169,7 +169,7 @@ export async function importMemories(opts: ImportOptions): Promise<ImportReport>
 
     const { error: insertErr } = await supabase.from('memory_items').insert(payload);
     if (insertErr) {
-      console.error('[mnemos-import] insert failed:', insertErr.message);
+      console.error('[mnestra-import] insert failed:', insertErr.message);
       report.errors++;
       continue;
     }

@@ -1,5 +1,5 @@
 /**
- * Mnemos — memory_summarize_session
+ * Mnestra — memory_summarize_session
  *
  * Extracts discrete facts from a session transcript (or any text) using
  * Claude Haiku, then stores each as a memory via memoryRemember. The
@@ -31,14 +31,14 @@ const VALID_IMPORTANCE = new Set<Importance>(['critical', 'important', 'minor'])
 async function extractFacts(text: string): Promise<ExtractedFact[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
   if (!apiKey) {
-    console.error('[mnemos] ANTHROPIC_API_KEY missing — summarize_session returning empty');
+    console.error('[mnestra] ANTHROPIC_API_KEY missing — summarize_session returning empty');
     return [];
   }
 
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
 
-  const model = process.env.MNEMOS_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
+  const model = process.env.MNESTRA_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
 
   let response;
   try {
@@ -64,7 +64,7 @@ ${text.slice(0, 80_000)}`,
       ],
     });
   } catch (err) {
-    console.error('[mnemos] extractFacts Anthropic call failed:', err);
+    console.error('[mnestra] extractFacts Anthropic call failed:', err);
     return [];
   }
 
@@ -104,7 +104,7 @@ ${text.slice(0, 80_000)}`,
     }
     return out;
   } catch (err) {
-    console.error('[mnemos] extractFacts JSON parse failed:', err);
+    console.error('[mnestra] extractFacts JSON parse failed:', err);
     return [];
   }
 }
@@ -140,7 +140,7 @@ export async function memorySummarizeSession(
       else if (result === 'updated') updated++;
       else skipped++;
     } catch (err) {
-      console.error('[mnemos] summarize: remember failed for fact:', err);
+      console.error('[mnestra] summarize: remember failed for fact:', err);
       skipped++;
     }
   }

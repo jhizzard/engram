@@ -1,10 +1,10 @@
--- Mnemos v0.1 — core tables
+-- Mnestra v0.1 — core tables
 --
 -- Run against a Postgres 15+ database that has pgvector installed
 -- (Supabase already ships with it). Apply in order:
---   001_mnemos_tables.sql
---   002_mnemos_search_function.sql
---   003_mnemos_event_webhook.sql
+--   001_mnestra_tables.sql
+--   002_mnestra_search_function.sql
+--   003_mnestra_event_webhook.sql
 
 create extension if not exists "vector";
 create extension if not exists "pg_trgm";

@@ -1,22 +1,17 @@
--- Mnemos v0.2 — match_count cap + EXPLAIN variant
+-- Mnestra v0.1 — memory_hybrid_search
 --
--- Two changes to the search surface:
+-- Reciprocal rank fusion over full-text and semantic search, with the
+-- three SQL-side fixes from RAG-MEMORY-IMPROVEMENTS-AND-TERMDECK-STRATEGY.md:
 --
---   1. memory_hybrid_search gains a configurable cap on `match_count`.
---      Default cap: 200. The original function was unbounded, which risks
---      runaway queries at scale (10k+ rows pulled per call).
+--   Fix 1 — Tiered recency decay by source_type. Architectural decisions
+--           decay on a one-year half-life; bug fixes on a 30-day half-life;
+--           session summaries and document chunks on a 14-day half-life.
 --
---      Override per-database:   ALTER DATABASE your_db SET mnemos.max_match_count = 500;
---      Override per-session:    SET mnemos.max_match_count = 500;
---      Leave unset:             cap defaults to 200.
+--   Fix 3 — Source_type weighting. Decisions and architecture outrank
+--           raw document chunks in the final fused score.
 --
---   2. A new function `memory_hybrid_search_explain` that returns
---      EXPLAIN (ANALYZE, BUFFERS) output for an equivalent call. Used by
---      `mnemos diagnose` to troubleshoot slow recall queries.
---
--- Rerun-safe: CREATE OR REPLACE on both.
-
--- ── memory_hybrid_search ─────────────────────────────────────────────────
+--   Fix 5 — Project affinity scoring. Exact project match multiplies the
+--           score by 1.5x; mismatches are penalised 0.7x.
 
 create or replace function memory_hybrid_search (
   query_text          text,
@@ -80,6 +75,7 @@ fused as (
     c.metadata,
     c.created_at,
     c.age_seconds,
+    -- RRF base score
     coalesce(full_text_weight / (rrf_k + ft.rank), 0.0) +
     coalesce(semantic_weight  / (rrf_k + sr.rank), 0.0) as base_score
   from candidates c
@@ -96,6 +92,7 @@ scored as (
     f.metadata,
     f.created_at,
     f.base_score
+      -- Fix 1: tiered recency decay by source_type
       * case f.source_type
           when 'decision'        then 1.0 / (1.0 + f.age_seconds / (365.0 * 86400.0))
           when 'architecture'    then 1.0 / (1.0 + f.age_seconds / (365.0 * 86400.0))
@@ -109,6 +106,7 @@ scored as (
           when 'code_context'    then 1.0 / (1.0 + f.age_seconds / ( 14.0 * 86400.0))
           else                         1.0 / (1.0 + f.age_seconds / ( 30.0 * 86400.0))
         end
+      -- Fix 3: source_type weighting
       * case f.source_type
           when 'decision'       then 1.5
           when 'architecture'   then 1.4
@@ -118,6 +116,7 @@ scored as (
           when 'document_chunk' then 0.6
           else                       1.0
         end
+      -- Fix 5: project affinity scoring
       * case
           when filter_project is null then 1.0
           when f.project = filter_project then 1.5
@@ -138,39 +137,5 @@ select
   s.created_at
 from scored s
 order by s.score desc
-limit least(
-  greatest(match_count, 1),
-  coalesce(nullif(current_setting('mnemos.max_match_count', true), '')::int, 200)
-);
-$$;
-
--- ── memory_hybrid_search_explain ─────────────────────────────────────────
-
-create or replace function memory_hybrid_search_explain (
-  query_text          text,
-  query_embedding     vector(1536),
-  match_count         int default 20,
-  full_text_weight    float default 1.0,
-  semantic_weight     float default 1.0,
-  rrf_k               int default 60,
-  filter_project      text default null,
-  filter_source_type  text default null
-)
-returns setof text
-language plpgsql
-as $$
-begin
-  return query execute
-    'explain (analyze, buffers, format text) '
-    || 'select * from memory_hybrid_search($1, $2, $3, $4, $5, $6, $7, $8)'
-  using
-    query_text,
-    query_embedding,
-    match_count,
-    full_text_weight,
-    semantic_weight,
-    rrf_k,
-    filter_project,
-    filter_source_type;
-end;
+limit match_count;
 $$;

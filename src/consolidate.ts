@@ -1,5 +1,5 @@
 /**
- * Mnemos — consolidation job (Fix 4)
+ * Mnestra — consolidation job (Fix 4)
  *
  * Scans memory_items for clusters of highly-similar memories (>0.85
  * cosine similarity), merges each cluster into a single canonical memory
@@ -40,13 +40,13 @@ interface MemoryRow {
 async function synthesizeCanonical(cluster: MemoryRow[]): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
   if (!apiKey) {
-    console.error('[mnemos-consolidate] no ANTHROPIC_API_KEY — skipping synthesis');
+    console.error('[mnestra-consolidate] no ANTHROPIC_API_KEY — skipping synthesis');
     return null;
   }
 
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
-  const model = process.env.MNEMOS_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
+  const model = process.env.MNESTRA_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
 
   // Defensive: strip <private>...</private> from every cluster member
   // before sending to the LLM. New rows are redacted at write time in
@@ -77,7 +77,7 @@ Canonical fact:`,
     const out = block.text.trim();
     return out || null;
   } catch (err) {
-    console.error('[mnemos-consolidate] synthesis failed:', err);
+    console.error('[mnestra-consolidate] synthesis failed:', err);
     return null;
   }
 }
@@ -102,7 +102,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
     .limit(500);
 
   if (error || !memories) {
-    console.error('[mnemos-consolidate] fetch failed:', error?.message);
+    console.error('[mnestra-consolidate] fetch failed:', error?.message);
     report.errors++;
     return report;
   }
@@ -118,7 +118,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
     try {
       embedding = await generateEmbedding(seed.content);
     } catch (err) {
-      console.error('[mnemos-consolidate] embed failed for seed:', err);
+      console.error('[mnestra-consolidate] embed failed for seed:', err);
       report.errors++;
       continue;
     }
@@ -131,7 +131,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
     });
 
     if (matchErr) {
-      console.error('[mnemos-consolidate] match_memories failed:', matchErr.message);
+      console.error('[mnestra-consolidate] match_memories failed:', matchErr.message);
       report.errors++;
       continue;
     }
@@ -162,7 +162,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
     try {
       canonicalEmbedding = await generateEmbedding(canonical);
     } catch (err) {
-      console.error('[mnemos-consolidate] canonical embed failed:', err);
+      console.error('[mnestra-consolidate] canonical embed failed:', err);
       report.errors++;
       continue;
     }
@@ -188,7 +188,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
       .single();
 
     if (insertErr || !inserted) {
-      console.error('[mnemos-consolidate] canonical insert failed:', insertErr?.message);
+      console.error('[mnestra-consolidate] canonical insert failed:', insertErr?.message);
       report.errors++;
       continue;
     }
@@ -204,7 +204,7 @@ export async function consolidateMemories(): Promise<ConsolidationReport> {
       .in('id', ids);
 
     if (supersedeErr) {
-      console.error('[mnemos-consolidate] supersede update failed:', supersedeErr.message);
+      console.error('[mnestra-consolidate] supersede update failed:', supersedeErr.message);
       report.errors++;
       continue;
     }

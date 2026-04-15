@@ -1,5 +1,5 @@
 /**
- * Mnemos — memory_search (low-level)
+ * Mnestra — memory_search (low-level)
  *
  * Raw hybrid search with optional filters. Unlike memory_recall, this does
  * NOT apply token budgeting, deduplication, or smart re-ranking. Use it for
@@ -30,7 +30,7 @@ export async function memorySearch(input: SearchInput): Promise<RecallHit[]> {
   });
 
   if (error) {
-    console.error('[mnemos-search] memory_hybrid_search failed:', error.message);
+    console.error('[mnestra-search] memory_hybrid_search failed:', error.message);
     return [];
   }
 

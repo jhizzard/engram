@@ -1,9 +1,9 @@
 /**
- * Mnemos — public API entry point
+ * Mnestra — public API entry point
  *
  * Re-exports the core memory functions for programmatic use. If you
- * want the stdio MCP server, import from `@jhizzard/mnemos/mcp-server`
- * or run the `mnemos` bin.
+ * want the stdio MCP server, import from `@jhizzard/mnestra/mcp-server`
+ * or run the `mnestra` bin.
  */
 
 export { memoryRemember } from './remember.js';

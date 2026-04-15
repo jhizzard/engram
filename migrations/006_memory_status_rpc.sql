@@ -1,4 +1,4 @@
--- Mnemos migration 006 — memory_status_aggregation RPC
+-- Mnestra migration 006 — memory_status_aggregation RPC
 --
 -- Why: `memoryStatus()` previously did a plain
 --   supabase.from('memory_items').select('project, source_type, category')

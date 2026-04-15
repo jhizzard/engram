@@ -1,5 +1,5 @@
 /**
- * Mnemos — stripPrivate unit tests
+ * Mnestra — stripPrivate unit tests
  *
  * Covers the privacy tag edge matrix:
  *   - single inline block
