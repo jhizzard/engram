@@ -10,6 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web viewer UI for browsing memories (port 37777), matching the shape `claude-mem` ships.
 - Claude Code lifecycle-hooks capture path — auto-ingest tool usage without a client call.
 
+## [0.2.1] - 2026-04-19
+
+### Added
+- **`~/.termdeck/secrets.env` fallback for `mnestra serve`.** When `SUPABASE_URL` is not set in the environment, the `serve` subcommand now parses `~/.termdeck/secrets.env` (dotenv-style `KEY=value` lines, with `#` comments and optional surrounding quotes) and populates `process.env` for any keys that aren't already set. Existing env vars are never overridden; missing file is a silent no-op. Eliminates the #1 recurring startup friction: starting Mnestra without sourcing secrets first. Only the `serve` path is affected — the default stdio MCP server, `export`, `import`, `--help`, and `--version` are unchanged.
+
 ## [0.2.0] - 2026-04-13
 
 ### Added

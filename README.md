@@ -36,12 +36,15 @@ You will also need:
 
 ### Apply the migrations
 
-The `migrations/` directory contains three SQL files. Apply them in order against your database:
+The `migrations/` directory contains six SQL files. Apply them in order against your database:
 
 ```bash
 psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/001_mnestra_tables.sql
 psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/002_mnestra_search_function.sql
 psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/003_mnestra_event_webhook.sql
+psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/004_mnestra_match_count_cap_and_explain.sql
+psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/005_v0_1_to_v0_2_upgrade.sql
+psql "$DATABASE_URL" -f node_modules/@jhizzard/mnestra/migrations/006_memory_status_rpc.sql
 ```
 
 If you're using Supabase, paste each file into the SQL editor and run them in order.
@@ -215,7 +218,7 @@ Three tables and one search function:
 - **`memory_relationships`** — typed relationships between memories: `supersedes`, `relates_to`, `contradicts`, `elaborates`, `caused_by`.
 - **`memory_hybrid_search()`** — RRF fusion of full-text + semantic search, with tiered recency decay, source_type weighting, and project affinity scoring all in one SQL function.
 
-Full DDL is in [`migrations/001_mnestra_tables.sql`](migrations/001_mnestra_tables.sql) and [`migrations/002_mnestra_search_function.sql`](migrations/002_mnestra_search_function.sql). Schema documentation is at [`docs/SCHEMA.md`](docs/SCHEMA.md).
+Full DDL is split across six migration files in [`migrations/`](migrations/) (tables, search function, event webhook, match-count cap + explain helper, v0.1→v0.2 upgrade, and the `memory_status` RPC). Schema documentation is at [`docs/SCHEMA.md`](docs/SCHEMA.md).
 
 ---
 

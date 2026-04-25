@@ -40,7 +40,7 @@ import type {
   StatusReport,
 } from './types.js';
 
-export const WEBHOOK_VERSION = '0.2.0';
+export const WEBHOOK_VERSION = '0.2.1';
 
 export interface OpDeps {
   remember: (input: RememberInput) => Promise<RememberResult>;

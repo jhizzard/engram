@@ -12,6 +12,10 @@
  * clients are unaffected.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -41,6 +45,38 @@ function parseFlag(args: string[], name: string): string | undefined {
     if (a.startsWith(`${prefix}=`)) return a.slice(prefix.length + 1);
   }
   return undefined;
+}
+
+/**
+ * Fallback for `mnestra serve`: if SUPABASE_URL isn't in the environment,
+ * try loading `~/.termdeck/secrets.env` (dotenv-style key=value lines).
+ * Existing env vars are not overridden. Silent no-op if the file is absent.
+ */
+function loadTermdeckSecretsFallback(): void {
+  if (process.env.SUPABASE_URL) return;
+  const secretsPath = join(homedir(), '.termdeck', 'secrets.env');
+  if (!existsSync(secretsPath)) return;
+  try {
+    const lines = readFileSync(secretsPath, 'utf8').split('\n');
+    let loaded = 0;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const key = match[1]!;
+      if (process.env[key]) continue;
+      process.env[key] = match[2]!.replace(/^["']|["']$/g, '');
+      loaded++;
+    }
+    if (loaded > 0) {
+      console.error(`[mnestra] Loaded ${loaded} secrets from ~/.termdeck/secrets.env`);
+    }
+  } catch (err) {
+    console.error(
+      `[mnestra] Failed to read ~/.termdeck/secrets.env: ${(err as Error).message}`
+    );
+  }
 }
 
 const HELP_TEXT = `mnestra — persistent developer memory (MCP + HTTP)
@@ -82,6 +118,7 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
   }
   process.exit(0);
 } else if (subcommand === 'serve') {
+  loadTermdeckSecretsFallback();
   startWebhookServer();
 } else if (subcommand === 'export') {
   const rest = process.argv.slice(3);
@@ -102,7 +139,7 @@ async function startMcpStdio(): Promise<void> {
 
 const server = new McpServer({
   name: 'mnestra',
-  version: '0.2.0',
+  version: '0.2.1',
 });
 
 // ── memory_remember ──────────────────────────────────────────────────────
