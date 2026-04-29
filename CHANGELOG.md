@@ -11,6 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Claude Code lifecycle-hooks capture path — auto-ingest tool usage without a client call.
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 
+## [0.3.3] - 2026-04-29
+
+### Fixed — Sprint 42 T3: package.json `main` and `types` fields
+
+- **`package.json "main": "./dist/index.js"` and `"types": "./dist/index.d.ts"` were broken since v0.2.0** — the actual compiled outputs land at `dist/src/index.js` and `dist/src/index.d.ts` because `tsconfig.json` `"rootDir": "."` plus `"include": ["src/**/*.ts", "mcp-server/**/*.ts"]` preserves the source-tree layout under `dist/`. Consumers haven't hit the bug because npm `bin` (`./dist/mcp-server/index.js`) resolves correctly and the package is consumed via the `mnestra` CLI, not `require('@jhizzard/mnestra')`. Cosmetic-but-correctness fix; pinned by NEW `tests/main-field.test.ts` (3 tests) which asserts `main`, `types`, and `bin.mnestra` all resolve to existing files via `fs.existsSync`.
+
+### Notes
+
+- Bundled as part of the TermDeck Sprint 42 close-out. T3's lane diagnosed both the `main` field gap here and a parallel migration-003 templating gap on the TermDeck side; both ship in the same release wave (`termdeck@0.11.0` / `termdeck-stack@0.4.6` / `mnestra@0.3.3` / `rumen@0.4.4`).
+- **Validation.** Mnestra full test suite **42/42 green** (was 39 pre-Sprint-42, +3 from `main-field.test.ts`). `node -e "require('./package.json'); console.log(require.resolve('./dist/src/index.js'))"` resolves cleanly.
+
 ## [0.3.2] - 2026-04-28
 
 ### Fixed — Brad install incident: silent permission-denied failures (root-caused 2026-04-28)
