@@ -11,6 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Claude Code lifecycle-hooks capture path — auto-ingest tool usage without a client call.
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 
+## [0.3.4] - 2026-05-02
+
+### Fixed — MCP stdio bypassed `~/.termdeck/secrets.env` fallback (Joshua's 2026-05-02 regression)
+
+- **`loadTermdeckSecretsFallback()` was only invoked for the `serve` subcommand** (`mcp-server/index.ts:124`); the default MCP stdio path (the one Claude Code launches via `claude mcp add mnestra ...`) skipped it entirely. Combined with the parallel `@jhizzard/termdeck-stack@≤0.4.11` bug that wrote literal `${SUPABASE_URL}` / `${SUPABASE_SERVICE_ROLE_KEY}` strings into the MCP env block (Claude Code does not shell-expand MCP env), every `memory_recall` / `memory_remember` / `memory_status` call surfaced as `Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL.` even though `~/.termdeck/secrets.env` was correctly populated. Three-layer fix: (1) `loadTermdeckSecretsFallback()` now runs for the default MCP stdio launch and the `export` / `import` subcommands too; (2) NEW helper `isUnexpandedPlaceholder(v)` treats values shaped like `${VAR}` as if the env var were unset, so the fallback overrides them from `secrets.env` instead of bailing out on a non-empty-but-invalid string; (3) the existing concrete-value protection still wins (legitimate runtime env vars are never overridden). Stack-installer companion fix in `@jhizzard/termdeck-stack@0.4.12` rewrites the env writer to read concrete values from `secrets.env` and to repair already-broken `${...}` entries on next stack run.
+
+### Notes
+
+- Verified by running `mnestra` with `SUPABASE_URL='${SUPABASE_URL}'` literal env: the secrets fallback fires (`[mnestra] Loaded N secrets from ~/.termdeck/secrets.env`) and `memory_status` returns the live aggregation (6237 memories at the time of fix). Mnestra full test suite **42/42 green**, no test changes needed (the bug was in entry-point branch routing, which has no direct unit coverage; integration verified manually).
+- Defense-in-depth lesson: a fix should both prevent the upstream cause AND survive the upstream cause regressing. Even after `termdeck-stack@0.4.12` ships, an old `~/.claude.json` written by `≤0.4.11` keeps working without manual repair because mnestra now ignores `${...}` placeholders.
+
 ## [0.3.3] - 2026-04-29
 
 ### Fixed — Sprint 42 T3: package.json `main` and `types` fields

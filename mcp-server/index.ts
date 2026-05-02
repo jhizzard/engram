@@ -52,12 +52,29 @@ function parseFlag(args: string[], name: string): string | undefined {
 }
 
 /**
- * Fallback for `mnestra serve`: if SUPABASE_URL isn't in the environment,
- * try loading `~/.termdeck/secrets.env` (dotenv-style key=value lines).
- * Existing env vars are not overridden. Silent no-op if the file is absent.
+ * Fallback for both `mnestra serve` and the default MCP stdio launch:
+ * if SUPABASE_URL isn't in the environment (or it's a literal `${VAR}`
+ * placeholder that the MCP client failed to expand), try loading
+ * `~/.termdeck/secrets.env` (dotenv-style key=value lines).
+ *
+ * A non-empty value that *looks like* an unexpanded shell placeholder
+ * (starts with `${` and ends with `}`) is treated as if the variable were
+ * unset — Claude Code does not perform shell expansion on MCP env values
+ * and writing those placeholders into ~/.claude.json (as the stack
+ * installer ≤ 0.4.11 did) caused mnestra to receive the literal string
+ * `${SUPABASE_URL}` and reject it as an invalid Supabase URL.
+ *
+ * Existing concrete env vars are not overridden. Silent no-op if the file
+ * is absent.
  */
+function isUnexpandedPlaceholder(v: string | undefined): boolean {
+  return typeof v === 'string' && v.startsWith('${') && v.endsWith('}');
+}
+
 function loadTermdeckSecretsFallback(): void {
-  if (process.env.SUPABASE_URL) return;
+  if (process.env.SUPABASE_URL && !isUnexpandedPlaceholder(process.env.SUPABASE_URL)) {
+    return;
+  }
   const secretsPath = join(homedir(), '.termdeck', 'secrets.env');
   if (!existsSync(secretsPath)) return;
   try {
@@ -69,7 +86,8 @@ function loadTermdeckSecretsFallback(): void {
       const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
       if (!match) continue;
       const key = match[1]!;
-      if (process.env[key]) continue;
+      const existing = process.env[key];
+      if (existing && !isUnexpandedPlaceholder(existing)) continue;
       process.env[key] = match[2]!.replace(/^["']|["']$/g, '');
       loaded++;
     }
@@ -125,17 +143,25 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
   loadTermdeckSecretsFallback();
   startWebhookServer();
 } else if (subcommand === 'export') {
+  loadTermdeckSecretsFallback();
   const rest = process.argv.slice(3);
   const project = parseFlag(rest, 'project');
   const since = parseFlag(rest, 'since');
   const report = await exportMemories({ project, since, out: process.stdout });
   process.stderr.write(`[mnestra-export] wrote ${report.rows} rows\n`);
 } else if (subcommand === 'import') {
+  loadTermdeckSecretsFallback();
   const report = await importMemories({ in: process.stdin });
   process.stderr.write(
     `[mnestra-import] processed=${report.processed} inserted=${report.inserted} skipped=${report.skipped} errors=${report.errors}\n`
   );
 } else {
+  // Default path: stdio MCP server. Must load the secrets fallback too —
+  // the MCP client (Claude Code) launches mnestra without a shell, so
+  // ~/.zshrc-style exports don't reach the process. Without this, an
+  // empty or `${VAR}`-placeholder SUPABASE_URL in the MCP env block
+  // bypasses ~/.termdeck/secrets.env and Supabase rejects the URL.
+  loadTermdeckSecretsFallback();
   await startMcpStdio();
 }
 
