@@ -38,6 +38,9 @@ import {
 } from '../src/index.js';
 import { startWebhookServer } from '../src/webhook-server.js';
 import { exportMemories, importMemories } from '../src/export-import.js';
+import { runDoctor, formatDoctor } from '../src/doctor.js';
+import { createSupabaseDoctorDataSource } from '../src/doctor-data-source.js';
+import { getSupabase } from '../src/db.js';
 
 const subcommand = process.argv[2];
 
@@ -106,6 +109,8 @@ const HELP_TEXT = `mnestra — persistent developer memory (MCP + HTTP)
 Usage:
   mnestra                    Start the stdio MCP server (default; backwards compatible)
   mnestra serve              Start the HTTP webhook server on $MNESTRA_WEBHOOK_PORT (default 37778)
+  mnestra doctor             Health-probe the install (cron all-zeros, latency, schema drift, MCP path parity)
+                              Exit 0 = all green, 1 = at least one red, 2 = at least one yellow.
   mnestra export [opts]      Stream memory rows as JSONL to stdout
                               --project <name>   only this project
                               --since <ISO-8601> only rows updated on/after timestamp
@@ -142,6 +147,13 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
 } else if (subcommand === 'serve') {
   loadTermdeckSecretsFallback();
   startWebhookServer();
+} else if (subcommand === 'doctor') {
+  loadTermdeckSecretsFallback();
+  const supabase = getSupabase();
+  const data = createSupabaseDoctorDataSource(supabase);
+  const report = await runDoctor({ data });
+  process.stdout.write(formatDoctor(report) + '\n');
+  process.exit(report.exitCode);
 } else if (subcommand === 'export') {
   loadTermdeckSecretsFallback();
   const rest = process.argv.slice(3);
