@@ -111,6 +111,7 @@ Usage:
   mnestra serve              Start the HTTP webhook server on $MNESTRA_WEBHOOK_PORT (default 37778)
   mnestra doctor             Health-probe the install (cron all-zeros, latency, schema drift, MCP path parity)
                               Exit 0 = all green, 1 = at least one red, 2 = at least one yellow.
+                              --json                emit structured DoctorReport instead of text
   mnestra export [opts]      Stream memory rows as JSONL to stdout
                               --project <name>   only this project
                               --since <ISO-8601> only rows updated on/after timestamp
@@ -152,7 +153,14 @@ if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
   const supabase = getSupabase();
   const data = createSupabaseDoctorDataSource(supabase);
   const report = await runDoctor({ data });
-  process.stdout.write(formatDoctor(report) + '\n');
+  // Sprint 53 T3: --json emits the structured report (Brad-equivalent
+  // diagnosis without a psql round-trip). Default text path unchanged.
+  const wantsJson = process.argv.slice(3).some((a) => a === '--json');
+  if (wantsJson) {
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+  } else {
+    process.stdout.write(formatDoctor(report) + '\n');
+  }
   process.exit(report.exitCode);
 } else if (subcommand === 'export') {
   loadTermdeckSecretsFallback();

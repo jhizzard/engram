@@ -25,6 +25,7 @@ import {
   type DoctorDataSource,
   type FsLike,
   type McpPaths,
+  type RumenJobRecord,
 } from '../src/doctor.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -66,6 +67,8 @@ interface FakeOpts {
   rpcExists?: Record<string, boolean>;
   vaultSecretExists?: Record<string, boolean>;
   schemaProbeThrow?: boolean;
+  rumenJobs?: RumenJobRecord[];
+  rumenJobsThrow?: boolean;
 }
 
 function makeFakeData(opts: FakeOpts): DoctorDataSource {
@@ -89,6 +92,10 @@ function makeFakeData(opts: FakeOpts): DoctorDataSource {
     async vaultSecretExists(name) {
       if (opts.schemaProbeThrow) throw new Error('mnestra_doctor_vault_secret_exists: function does not exist');
       return opts.vaultSecretExists?.[name] ?? true;
+    },
+    async rumenJobsRecent(_limit) {
+      if (opts.rumenJobsThrow) throw new Error('rumen_jobs: relation does not exist');
+      return opts.rumenJobs ?? [];
     },
   };
 }

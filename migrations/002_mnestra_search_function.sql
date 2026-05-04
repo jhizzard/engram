@@ -12,6 +12,43 @@
 --
 --   Fix 5 — Project affinity scoring. Exact project match multiplies the
 --           score by 1.5x; mismatches are penalised 0.7x.
+--
+-- Sprint 51.9 — signature-drift guard. Same Class A pattern Sprint 52.1
+-- closed for `match_memories` (mig 001:81-95). Codex T4 surfaced the cousin
+-- 2026-05-04 14:42 ET during Sprint 51.5b dogfood: long-lived v0.6.x-era
+-- installs (Joshua's petvetbid, likely Brad's jizzard-brain) ALSO have a
+-- 10-arg drift overload of `memory_hybrid_search` coexisting with the
+-- canonical 8-arg signature. The drift overload carries the never-shipped
+-- `recency_weight`/`decay_days` parameters from a pre-canonical Mnestra
+-- iteration or the rag-system writer's bootstrap. PostgREST + MCP clients
+-- hit ambiguous-overload errors when calling `memory_hybrid_search` with
+-- the canonical 8-arg shape because Postgres can't disambiguate.
+--
+-- The do-block below drops all `public.memory_hybrid_search` overloads
+-- regardless of arg list, so the subsequent CREATE OR REPLACE always
+-- lands cleanly on greenfield AND existing-drift installs. Idempotent —
+-- on a brand-new project the loop iterates zero times. Scoped to schema
+-- `public`. No CASCADE — same reasoning as mig 001's guard: SQL function
+-- bodies that call this function (none currently exist) would resolve
+-- by name at call time.
+--
+-- mig 004 will subsequently `CREATE OR REPLACE` this function with the
+-- match_count cap variant (still 8 args). End state: ONE 8-arg version
+-- of memory_hybrid_search in public schema. Ambiguity gone.
+
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.proname = 'memory_hybrid_search' and n.nspname = 'public'
+  loop
+    execute 'drop function ' || r.sig::text;
+  end loop;
+end $$;
 
 create or replace function memory_hybrid_search (
   query_text          text,

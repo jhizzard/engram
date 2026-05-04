@@ -78,6 +78,45 @@ create index if not exists memory_relationships_target_idx on memory_relationshi
 
 -- ── match_memories helper RPC ─────────────────────────────────────────────
 -- Used by remember.ts (dedup) and consolidate.ts (cluster seeding).
+--
+-- Sprint 52.1 — signature-drift guard. On long-lived v0.6.x-era installs
+-- (Joshua's petvetbid, Brad's jizzard-brain), match_memories was created by
+-- a prior Mnestra version with a different RETURN-table column shape:
+--   (id, content, metadata, source_type, category, project, created_at, similarity)
+-- vs the canonical:
+--   (id, content, source_type, category, project, metadata, similarity)
+-- Postgres rejects `CREATE OR REPLACE FUNCTION` when the return-table
+-- column list changes — `cannot change return type of existing function`
+-- — and the migration replay throws exit 5. Sprint 51.7 fixed Class M
+-- (DB failure no longer strands hook upgrade) but this drift remained
+-- and was the only blocker keeping `termdeck init --mnestra` from
+-- finishing cleanly on existing v0.6.x installs. Sprint 51.8 fixed
+-- Class N (settings.json wiring lockstep).
+--
+-- The do-block below drops all `public.match_memories` overloads
+-- regardless of arg list, so the subsequent CREATE OR REPLACE always
+-- lands cleanly on greenfield AND existing-drift installs. Idempotent —
+-- on a brand-new project the loop iterates zero times. Scoped to schema
+-- `public` so we never touch a same-named function in another schema.
+-- No CASCADE: dependent objects in plpgsql/SQL function bodies (e.g.
+-- `memory_recall_graph` from migration 010) reference functions by
+-- name and resolve at call time, so the drop-then-recreate pattern is
+-- safe without CASCADE. If a true hard dependency (view, generated
+-- column) ever appears, the DROP fails loud — the right behavior.
+
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.proname = 'match_memories' and n.nspname = 'public'
+  loop
+    execute 'drop function ' || r.sig::text;
+  end loop;
+end $$;
 
 create or replace function match_memories (
   query_embedding   vector(1536),

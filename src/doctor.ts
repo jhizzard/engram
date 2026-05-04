@@ -36,6 +36,41 @@ export interface CronRunRecord {
 }
 
 /**
+ * One row from `public.rumen_jobs` — the rumen package's own per-tick log.
+ * Distinct from `cron.job_run_details`: rumen_jobs is a userland queue
+ * the rumen-tick Edge Function writes to, with package-level fields like
+ * sessions_processed and error_message. cron.job_run_details is pg_cron's
+ * scheduler-level wrapper output.
+ *
+ * Surfacing this row in `mnestra doctor` closes Sprint 51.5b T2 finding #1
+ * (cron return_message blindness): when a tick errors, error_message holds
+ * the actual reason — doctor surfaces it directly so an auditor's
+ * diagnosis-by-doctor matches diagnosis-by-psql.
+ */
+export interface RumenJobRecord {
+  id: string;
+  /**
+   * NOTE: started_at is set with `DEFAULT NOW()` at INSERT but per Sprint 53
+   * T4-CODEX cross-finding (live daily-driver probe at 17:17 ET, 480 rows
+   * with completed_at recent but started_at filtered out by 5-day window),
+   * may be stale on rows the rumen-tick function UPDATEs without refreshing.
+   * Doctor renders BOTH timestamps so any skew is visible.
+   */
+  started_at: string;
+  completed_at: string | null;
+  /** 'pending' | 'running' | 'done' | 'failed' (rumen_jobs.status check). */
+  status: string;
+  sessions_processed: number;
+  insights_generated: number;
+  /**
+   * Populated when status='failed'. The brief originally referred to this
+   * as `return_message`, but that field lives on cron.job_run_details, not
+   * rumen_jobs — the rumen package writes errors here.
+   */
+  error_message: string | null;
+}
+
+/**
  * The data plane the doctor needs. The default implementation talks to
  * Supabase via the SECURITY DEFINER helpers in migration 016. Tests
  * inject a fake. Each probe must either return a value or throw; the
@@ -47,6 +82,14 @@ export interface DoctorDataSource {
   columnExists(table: string, column: string): Promise<boolean>;
   rpcExists(name: string): Promise<boolean>;
   vaultSecretExists(name: string): Promise<boolean>;
+  /**
+   * Newest-first slice of `public.rumen_jobs`. Reads directly (rumen_jobs
+   * is in public, not cron/vault — service_role can SELECT without a
+   * SECURITY DEFINER wrapper). Throws on connectivity / permission errors;
+   * the doctor catches and degrades the rumen-tick informational section
+   * to absent rather than failing hard.
+   */
+  rumenJobsRecent(limit: number): Promise<RumenJobRecord[]>;
 }
 
 export interface FsLike {
@@ -76,6 +119,13 @@ export interface DoctorOptions {
 export interface DoctorReport {
   results: ProbeResult[];
   exitCode: 0 | 1 | 2;
+  /**
+   * Most-recent rows from `public.rumen_jobs`. Informational (not a probe
+   * verdict) — surfacing this in the rendered report lets an auditor see
+   * WHEN ticks ran and WHY any failed without dropping to psql. Absent
+   * (undefined) when the rumenJobsRecent probe threw or returned empty.
+   */
+  rumenJobs?: RumenJobRecord[];
 }
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -83,6 +133,16 @@ export interface DoctorReport {
 const DEFAULT_MIN_CYCLES = 6;
 const DEFAULT_LATENCY_P95_SEC = 5;
 const CRON_RUN_LIMIT = 10;
+const RUMEN_JOBS_RECENT_LIMIT = 5;
+/**
+ * Truncation budget for raw return_message strings appended to the
+ * all-zeros probe detail (Sprint 53 bonus fix). Long error blobs would
+ * blow up the rendered output; ~200 chars is enough to identify the
+ * Postgres error class without dominating the report.
+ */
+const RETURN_MESSAGE_TRUNCATE_CHARS = 200;
+/** Truncation for rumen_jobs.error_message in the rendered table. */
+const ERROR_MESSAGE_TRUNCATE_CHARS = 80;
 
 const CRON_JOBS = ['rumen-tick', 'graph-inference-tick'] as const;
 
@@ -202,18 +262,49 @@ export function parseCronReturnMessage(msg: string | null): Record<string, numbe
 
 // ── Probe evaluators ─────────────────────────────────────────────────────
 
+/**
+ * Sprint 53 T3 bonus: collect non-numeric `return_message` strings from runs
+ * where `parseCronReturnMessage` extracted zero numeric fields. These are
+ * usually Postgres error blobs that the existing detail line silently
+ * dropped — surfacing them gives an auditor a one-line root cause without
+ * dropping to psql.
+ */
+function summarizeNonNumericReturnMessages(runs: CronRunRecord[]): string | null {
+  const blobs: string[] = [];
+  for (const r of runs) {
+    if (!r.return_message) continue;
+    const parsed = parseCronReturnMessage(r.return_message);
+    if (Object.keys(parsed).length > 0) continue;
+    const trimmed = r.return_message.trim();
+    if (trimmed) blobs.push(trimmed);
+  }
+  if (blobs.length === 0) return null;
+  // Deduplicate so 10 identical errors collapse to one.
+  const unique = Array.from(new Set(blobs));
+  const sample = unique[0]!;
+  const truncated =
+    sample.length > RETURN_MESSAGE_TRUNCATE_CHARS
+      ? sample.slice(0, RETURN_MESSAGE_TRUNCATE_CHARS) + '…'
+      : sample;
+  return unique.length === 1
+    ? `non-numeric return_message: ${truncated}`
+    : `${unique.length} distinct non-numeric return_messages, sample: ${truncated}`;
+}
+
 function evalAllZeros(
   job: (typeof CRON_JOBS)[number],
   runs: CronRunRecord[],
   minCycles: number
 ): ProbeResult {
   const successful = runs.filter((r) => r.status === 'succeeded');
+  const nonNumericNote = summarizeNonNumericReturnMessages(runs);
   if (successful.length < minCycles) {
     return {
       name: `${job} all-zeros`,
       status: 'green',
       detail:
-        `only ${successful.length} successful run(s) observed (need ≥${minCycles} for confident detection)`,
+        `only ${successful.length} successful run(s) observed (need ≥${minCycles} for confident detection)` +
+        (nonNumericNote ? `; ${nonNumericNote}` : ''),
       recommendations: [],
     };
   }
@@ -228,7 +319,9 @@ function evalAllZeros(
     return {
       name: `${job} all-zeros`,
       status: 'red',
-      detail: `${zeroRuns.length} of last ${successful.length} successful runs reported ${pattern.zeroKeys.join('=0 AND ')}=0`,
+      detail:
+        `${zeroRuns.length} of last ${successful.length} successful runs reported ${pattern.zeroKeys.join('=0 AND ')}=0` +
+        (nonNumericNote ? `; ${nonNumericNote}` : ''),
       recommendations: [
         `likely schema drift — run \`termdeck init --${job === 'rumen-tick' ? 'rumen' : 'rumen'}\` to audit`,
         'reference: docs/INSTALLER-PITFALLS.md ledger #13',
@@ -238,7 +331,9 @@ function evalAllZeros(
   return {
     name: `${job} all-zeros`,
     status: 'green',
-    detail: `${zeroRuns.length} of last ${successful.length} successful runs reported all-zero (below ${minCycles}-cycle threshold)`,
+    detail:
+      `${zeroRuns.length} of last ${successful.length} successful runs reported all-zero (below ${minCycles}-cycle threshold)` +
+      (nonNumericNote ? `; ${nonNumericNote}` : ''),
     recommendations: [],
   };
 }
@@ -489,7 +584,25 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   // Probe 4 — MCP config path parity.
   results.push(evalMcpPathParity(fs, mcpPaths));
 
-  return { results, exitCode: computeExitCode(results) };
+  // Informational section — most-recent rumen_jobs rows. Not a probe verdict
+  // (no green/red), just visibility into the rumen-tick log so an auditor
+  // sees error_message + sessions/insights counts inline.
+  //
+  // Sprint 53 T3 17:18 ET: switched ordering from started_at DESC to
+  // `coalesce(completed_at, started_at) DESC NULLS LAST` after the live
+  // daily-driver probe confirmed T4-CODEX's 17:17 ET cross-finding —
+  // started_at is NULL on legacy rows because the migration's
+  // NOT NULL DEFAULT was wrapped in ADD COLUMN IF NOT EXISTS and skipped.
+  // The DataSource handles ordering; the renderer surfaces both
+  // timestamps so a NULL started_at remains visible to the auditor.
+  let rumenJobs: RumenJobRecord[] | undefined;
+  try {
+    rumenJobs = await opts.data.rumenJobsRecent(RUMEN_JOBS_RECENT_LIMIT);
+  } catch {
+    rumenJobs = undefined;
+  }
+
+  return { results, exitCode: computeExitCode(results), rumenJobs };
 }
 
 // ── Renderer ─────────────────────────────────────────────────────────────
@@ -500,6 +613,46 @@ const ICONS: Record<ProbeStatus, string> = {
   red: '✗',
   unknown: '?',
 };
+
+function truncate(s: string | null, max: number): string {
+  if (!s) return '';
+  const trimmed = s.trim();
+  if (trimmed.length <= max) return trimmed;
+  return trimmed.slice(0, max) + '…';
+}
+
+/**
+ * Sprint 53 T3: render the "Recent rumen ticks" informational section
+ * after the probe verdicts. Surfaces error_message inline so an auditor's
+ * diagnosis-by-doctor matches diagnosis-by-psql. Keeps both started_at and
+ * completed_at columns so any clock skew (T4-CODEX 17:17 ET cross-finding)
+ * remains visible.
+ */
+export function formatRumenJobs(rows: RumenJobRecord[]): string[] {
+  const out: string[] = [];
+  out.push('');
+  out.push('Recent rumen ticks');
+  if (rows.length === 0) {
+    out.push('  (no rumen_jobs rows returned)');
+    return out;
+  }
+  const header =
+    '  started_at                 completed_at               status     sessions  insights  error_message';
+  const sep =
+    '  -------------------------  -------------------------  ---------  --------  --------  -------------';
+  out.push(header);
+  out.push(sep);
+  for (const r of rows) {
+    const started = r.started_at ? r.started_at.slice(0, 25).padEnd(25) : '—'.padEnd(25);
+    const completed = (r.completed_at ?? '—').slice(0, 25).padEnd(25);
+    const status = (r.status ?? '?').padEnd(9);
+    const sessions = String(r.sessions_processed).padStart(8);
+    const insights = String(r.insights_generated).padStart(8);
+    const errMsg = truncate(r.error_message, ERROR_MESSAGE_TRUNCATE_CHARS);
+    out.push(`  ${started}  ${completed}  ${status}  ${sessions}  ${insights}  ${errMsg}`);
+  }
+  return out;
+}
 
 export function formatDoctor(report: DoctorReport): string {
   const lines: string[] = [];
@@ -513,6 +666,9 @@ export function formatDoctor(report: DoctorReport): string {
     green: report.results.filter((r) => r.status === 'green').length,
     unknown: report.results.filter((r) => r.status === 'unknown').length,
   };
+  if (report.rumenJobs !== undefined) {
+    for (const line of formatRumenJobs(report.rumenJobs)) lines.push(line);
+  }
   lines.push('');
   lines.push(
     `Doctor complete. ${tally.red} red, ${tally.yellow} yellow, ${tally.green} green, ${tally.unknown} unknown. Exit ${report.exitCode}.`

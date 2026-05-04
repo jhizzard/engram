@@ -10,7 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { CronRunRecord, DoctorDataSource } from './doctor.js';
+import type { CronRunRecord, DoctorDataSource, RumenJobRecord } from './doctor.js';
 
 interface CronRunRow {
   jobname: string;
@@ -18,6 +18,16 @@ interface CronRunRow {
   start_time: string;
   end_time: string | null;
   return_message: string | null;
+}
+
+interface RumenJobRow {
+  id: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  sessions_processed: number | null;
+  insights_generated: number | null;
+  error_message: string | null;
 }
 
 export function createSupabaseDoctorDataSource(client: SupabaseClient): DoctorDataSource {
@@ -70,6 +80,52 @@ export function createSupabaseDoctorDataSource(client: SupabaseClient): DoctorDa
 
     async vaultSecretExists(name: string): Promise<boolean> {
       return callBoolProbe('mnestra_doctor_vault_secret_exists', { p_name: name });
+    },
+
+    async rumenJobsRecent(limit: number): Promise<RumenJobRecord[]> {
+      // public.rumen_jobs is in the public schema (not cron/vault), so
+      // service_role can SELECT directly via PostgREST without a
+      // SECURITY DEFINER wrapper.
+      //
+      // Ordering: live daily-driver probe (Sprint 53 T3 17:18 ET)
+      // confirmed T4-CODEX's 17:17 ET cross-finding — started_at is NULL
+      // on rows from older installs because the migration's
+      // `NOT NULL DEFAULT NOW()` was wrapped in `ADD COLUMN IF NOT EXISTS`
+      // and skipped on a pre-existing nullable column. ORDER BY
+      // started_at DESC put NULL rows first (PG default for DESC) and
+      // hid all recent activity. Fetched 2× the limit and sort in JS by
+      // `coalesce(completed_at, started_at)` DESC so:
+      //   - running ticks (completed_at NULL) sort by started_at
+      //   - completed ticks sort by completion time
+      //   - everything-NULL rows fall to the bottom
+      // The renderer still shows both timestamps so a NULL started_at
+      // remains visible to the auditor.
+      const fetchLimit = Math.max(limit * 2, limit + 5);
+      const { data, error } = await client
+        .from('rumen_jobs')
+        .select(
+          'id, started_at, completed_at, status, sessions_processed, insights_generated, error_message'
+        )
+        .order('completed_at', { ascending: false, nullsFirst: false })
+        .order('started_at', { ascending: false, nullsFirst: false })
+        .limit(fetchLimit);
+      if (error) throw new Error(`rumen_jobs: ${error.message}`);
+      const rows = Array.isArray(data) ? (data as RumenJobRow[]) : [];
+      const sorted = rows
+        .map((r) => ({
+          id: r.id,
+          started_at: r.started_at,
+          completed_at: r.completed_at,
+          status: r.status,
+          sessions_processed: r.sessions_processed ?? 0,
+          insights_generated: r.insights_generated ?? 0,
+          error_message: r.error_message,
+          _key: r.completed_at ?? r.started_at ?? '',
+        }))
+        .sort((a, b) => (a._key < b._key ? 1 : a._key > b._key ? -1 : 0))
+        .slice(0, limit)
+        .map(({ _key, ...rest }) => rest);
+      return sorted;
     },
   };
 }
