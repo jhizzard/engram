@@ -1,149 +1,159 @@
--- Mnestra v0.4.4 — security hardening.
+-- Mnestra v0.4.6 — security hardening (revised from 0.4.4 / 0.4.5).
 --
 -- Source: external Supabase-advisor sweep by Brad Heath / Nacho Money LLC,
 -- 2026-05-06. See docs/SECURITY-HARDENING-2026-05-06.md for the full flag
 -- and root-cause analysis. The standing rule lives in the global Claude
 -- Code instructions: "MANDATORY: Supabase RLS + privilege hygiene".
 --
--- Closes four hole classes that shipped in 0.4.3 and earlier:
+-- Two corrections folded into this revision:
+--
+--   A. **search_path must include `extensions`.** The 0.4.4/0.4.5 version of
+--      this migration set search_path = public, pg_catalog on the memory_*
+--      RPCs. Supabase >= 2024 installs pgvector in the `extensions` schema,
+--      so the `<=>` cosine-distance operator becomes unreachable from those
+--      RPCs after the alter — semantic recall fails with "operator does not
+--      exist: extensions.vector <=> extensions.vector". Confirmed live
+--      against the reference Mnestra project on 2026-05-06; fixed by
+--      including `extensions` in search_path.
+--
+--   B. **Schema-generation-aware.** Some Mnestra installs are on the older
+--      "memory_items-only" generation — they have memory_items /
+--      memory_relationships / memory_sessions + the 6 memory_* RPCs, but
+--      NOT the layered-memory tables (mnestra_session_memory,
+--      mnestra_developer_memory, mnestra_project_memory, mnestra_commands)
+--      and NOT the mnestra_doctor_* SECURITY DEFINER probes. The 0.4.4 / 0.4.5
+--      migration body assumed the layered shape and threw "relation does
+--      not exist" / "function does not exist" mid-migration on older
+--      installs. Brad caught this on three of his projects (Structural,
+--      aetheria-payroll, aetheria-phase1) and worked around with a
+--      signature-agnostic DO-block subset.
+--
+--      This revision restructures every section as defensive lookups
+--      against pg_class / pg_proc / pg_views, so each statement only fires
+--      when its target exists. The migration runs cleanly on:
+--        - layered-memory generation (Josh's reference project): full fix
+--        - memory_items-only generation (Brad's three projects): function
+--          hardening only; mnestra_*-targeting statements are skipped
+--        - mixed generation: each statement applies to whatever exists
+--
+-- Closes four hole classes (where applicable to the install's schema
+-- generation):
 --
 --   1. Permissive PUBLIC INSERT RLS on mnestra_{commands,developer_memory,
 --      project_memory,session_memory}. Created by Supabase Studio's
 --      "Allow insert for all" default-policy template at table-creation
---      time — never in source migrations, but inherited per project.
---      Anyone with the project's anon key could write directly to memory
---      tables, poisoning the corpus or session-id-squatting.
+--      time. Anyone with the project's anon key could write directly to
+--      memory tables, poisoning the corpus or session-id-squatting.
 --
 --   2. PUBLIC EXECUTE on every Mnestra function. Postgres defaults
 --      function EXECUTE to PUBLIC; the explicit `grant ... to service_role`
---      in earlier migrations is additive, not exclusive. The five
---      mnestra_doctor_* SECURITY DEFINER probes were the most exposed
---      (vault-secret-existence enumeration with the function-owner's
---      privileges); the six memory_* RPCs were also anon-callable.
+--      in earlier migrations is additive, not exclusive.
 --
 --   3. Mutable search_path on memory_* and mnestra_doctor_* functions
---      (Supabase lint 0011). Mitigates SECURITY DEFINER shadow-attack
---      vectors via operator-controlled schemas.
+--      (Supabase lint 0011).
 --
 --   4. mnestra_recent_activity SECURITY DEFINER view (Supabase lint 0010)
---      with anon+authenticated SELECT. Exposed a 100-row UNION of all
---      three memory layers to any anon-key holder — the most direct
---      memory-corpus exfiltration path aside from the dropped INSERT
---      policies.
+--      with anon+authenticated SELECT.
 --
--- Backward-compat: Mnestra writes via service_role only (which bypasses
--- RLS), so dropping the INSERT policies and revoking PUBLIC EXECUTE
--- doesn't break any documented architecture path. service_role keeps
--- full access.
+-- Backward-compat: zero behavior change for any Mnestra installation that
+-- follows the documented architecture (service-role writes via MCP server).
+-- service_role keeps EXECUTE on every function and SELECT on the view.
 --
--- Idempotence: every statement uses IF EXISTS / IF NOT EXISTS shapes or
--- tolerates being re-run. The two cron-related doctor probes are
--- conditionally created in migration 016 (only when pg_cron is present)
--- and are guarded with `do $$ ... $$` blocks here for the same reason.
+-- Idempotent: every section guards on object existence and uses
+-- IF EXISTS / signature-agnostic patterns. Re-running this migration is
+-- safe and is in fact the recommended way to upgrade a 0.4.4/0.4.5 install
+-- to pick up the search_path fix.
 
 -- ====================================================================
--- 1. Drop permissive PUBLIC INSERT policies on memory tables.
+-- 1. Drop permissive PUBLIC INSERT policies on mnestra_* tables, when
+--    those tables exist on this install. Skipped silently on older
+--    memory_items-only schema generation.
 -- ====================================================================
-
-drop policy if exists "Allow insert for all" on public.mnestra_commands;
-drop policy if exists "Allow insert for all" on public.mnestra_developer_memory;
-drop policy if exists "Allow insert for all" on public.mnestra_project_memory;
-drop policy if exists "Allow insert for all" on public.mnestra_session_memory;
-
--- ====================================================================
--- 2. Revoke EXECUTE from PUBLIC + anon + authenticated on every Mnestra
---    function. service_role keeps EXECUTE (granted explicitly in 014
---    + 016).
--- ====================================================================
-
--- mnestra_doctor_* SECURITY DEFINER probes
-revoke execute on function public.mnestra_doctor_column_exists(p_table text, p_column text)        from public, anon, authenticated;
-revoke execute on function public.mnestra_doctor_rpc_exists(p_name text)                           from public, anon, authenticated;
-revoke execute on function public.mnestra_doctor_vault_secret_exists(p_name text)                  from public, anon, authenticated;
-
--- pg_cron-conditional doctor probes (created in 016 only when pg_cron present)
-do $$
-begin
-  if exists (
-    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public' and p.proname = 'mnestra_doctor_cron_runs'
-  ) then
-    execute 'revoke execute on function public.mnestra_doctor_cron_runs(p_jobname text, p_limit integer) from public, anon, authenticated';
-  end if;
-  if exists (
-    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public' and p.proname = 'mnestra_doctor_cron_job_exists'
-  ) then
-    execute 'revoke execute on function public.mnestra_doctor_cron_job_exists(p_jobname text) from public, anon, authenticated';
-  end if;
-end $$;
-
--- memory_* RPCs (SECURITY INVOKER — server-side invocation only)
-revoke execute on function public.expand_memory_neighborhood(start_id uuid, max_depth integer)                                                                                                                                                                                       from public, anon, authenticated;
-revoke execute on function public.match_memories(query_embedding vector, match_threshold double precision, match_count integer, filter_project text)                                                                                                                                  from public, anon, authenticated;
-revoke execute on function public.memory_hybrid_search(query_text text, query_embedding vector, match_count integer, full_text_weight double precision, semantic_weight double precision, rrf_k integer, filter_project text, filter_source_type text)                                from public, anon, authenticated;
-revoke execute on function public.memory_hybrid_search_explain(query_text text, query_embedding vector, match_count integer, full_text_weight double precision, semantic_weight double precision, rrf_k integer, filter_project text, filter_source_type text)                        from public, anon, authenticated;
-revoke execute on function public.memory_recall_graph(query_embedding vector, project_filter text, max_depth integer, k integer)                                                                                                                                                      from public, anon, authenticated;
-revoke execute on function public.memory_status_aggregation()                                                                                                                                                                                                                          from public, anon, authenticated;
-
--- ====================================================================
--- 3. Pin search_path on every Mnestra function (Supabase lint 0011).
--- ====================================================================
-
-alter function public.expand_memory_neighborhood(start_id uuid, max_depth integer)
-  set search_path = public, pg_catalog;
-alter function public.match_memories(query_embedding vector, match_threshold double precision, match_count integer, filter_project text)
-  set search_path = public, pg_catalog;
-alter function public.memory_hybrid_search(query_text text, query_embedding vector, match_count integer, full_text_weight double precision, semantic_weight double precision, rrf_k integer, filter_project text, filter_source_type text)
-  set search_path = public, pg_catalog;
-alter function public.memory_hybrid_search_explain(query_text text, query_embedding vector, match_count integer, full_text_weight double precision, semantic_weight double precision, rrf_k integer, filter_project text, filter_source_type text)
-  set search_path = public, pg_catalog;
-alter function public.memory_recall_graph(query_embedding vector, project_filter text, max_depth integer, k integer)
-  set search_path = public, pg_catalog;
-alter function public.memory_status_aggregation()
-  set search_path = public, pg_catalog;
-
-alter function public.mnestra_doctor_column_exists(p_table text, p_column text)
-  set search_path = public, pg_catalog;
-alter function public.mnestra_doctor_rpc_exists(p_name text)
-  set search_path = public, pg_catalog;
-alter function public.mnestra_doctor_vault_secret_exists(p_name text)
-  set search_path = public, pg_catalog;
 
 do $$
+declare
+  tbl text;
+  tables text[] := array[
+    'mnestra_commands',
+    'mnestra_developer_memory',
+    'mnestra_project_memory',
+    'mnestra_session_memory'
+  ];
 begin
-  if exists (
-    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public' and p.proname = 'mnestra_doctor_cron_runs'
-  ) then
-    execute 'alter function public.mnestra_doctor_cron_runs(p_jobname text, p_limit integer) set search_path = public, pg_catalog';
-  end if;
-  if exists (
-    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public' and p.proname = 'mnestra_doctor_cron_job_exists'
-  ) then
-    execute 'alter function public.mnestra_doctor_cron_job_exists(p_jobname text) set search_path = public, pg_catalog';
-  end if;
+  foreach tbl in array tables loop
+    if to_regclass(format('public.%I', tbl)) is not null then
+      execute format('drop policy if exists "Allow insert for all" on public.%I', tbl);
+    end if;
+  end loop;
 end $$;
 
 -- ====================================================================
--- 4. Recreate mnestra_recent_activity view without SECURITY DEFINER,
---    revoke anon/authenticated SELECT. service_role keeps SELECT.
+-- 2 + 3. Revoke EXECUTE from public + anon + authenticated AND pin
+-- search_path on every Mnestra function. Signature-agnostic — iterates
+-- pg_proc to apply to whatever functions exist on this install. Covers
+-- memory_*, match_memories, expand_memory_neighborhood, and
+-- mnestra_doctor_*.
+--
+-- search_path includes `extensions` for the pgvector operator and
+-- pg_catalog for built-ins; doctor functions don't use vectors but the
+-- inclusion is harmless and keeps every Mnestra function uniform.
 -- ====================================================================
 
-drop view if exists public.mnestra_recent_activity;
+do $$
+declare
+  fn record;
+  sig text;
+begin
+  for fn in
+    select n.nspname,
+           p.proname,
+           pg_get_function_identity_arguments(p.oid) as ident_args
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prokind = 'f'
+       and (
+         p.proname like 'memory_%'
+         or p.proname in ('match_memories', 'expand_memory_neighborhood')
+         or p.proname like 'mnestra_doctor_%'
+       )
+  loop
+    sig := format('%I.%I(%s)', fn.nspname, fn.proname, fn.ident_args);
+    execute format('revoke execute on function %s from public, anon, authenticated', sig);
+    execute format('alter function %s set search_path = public, extensions, pg_catalog', sig);
+    -- service_role keeps EXECUTE; the revoke above only targets public/anon/authenticated.
+  end loop;
+end $$;
 
-create view public.mnestra_recent_activity as
-  select 'session'::text   as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_session_memory
-  union all
-  select 'project'::text   as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_project_memory
-  union all
-  select 'developer'::text as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_developer_memory
-  order by 8 desc
-  limit 100;
+-- ====================================================================
+-- 4. Recreate mnestra_recent_activity view without SECURITY DEFINER and
+-- restrict SELECT to service_role. Skipped silently if the view doesn't
+-- exist or any of the three underlying tables are missing.
+-- ====================================================================
 
-revoke all on public.mnestra_recent_activity from public, anon, authenticated;
-grant select on public.mnestra_recent_activity to service_role;
+do $$
+begin
+  if to_regclass('public.mnestra_session_memory') is not null
+     and to_regclass('public.mnestra_project_memory') is not null
+     and to_regclass('public.mnestra_developer_memory') is not null
+  then
+    drop view if exists public.mnestra_recent_activity;
+
+    execute $view$
+      create view public.mnestra_recent_activity as
+        select 'session'::text as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_session_memory
+        union all
+        select 'project'::text as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_project_memory
+        union all
+        select 'developer'::text as layer, id, session_id, event_type, payload, project, developer_id, "timestamp", created_at from public.mnestra_developer_memory
+        order by 8 desc
+        limit 100
+    $view$;
+
+    revoke all on public.mnestra_recent_activity from public, anon, authenticated;
+    grant select on public.mnestra_recent_activity to service_role;
+  end if;
+end $$;
 
 -- ====================================================================
 -- Post-apply verification (run separately in Studio SQL editor):
@@ -176,4 +186,5 @@ grant select on public.mnestra_recent_activity to service_role;
 --   union all select 'MUTABLE_SEARCH_PATH', proname from mutable_path;
 --
 -- Verified zero rows on the reference Mnestra project on 2026-05-06.
+-- Smoke test: select count(*) from memory_hybrid_search('smoke', array_fill(0::real, ARRAY[1536])::vector, 1) → 1 row, no operator-resolution error.
 -- ====================================================================

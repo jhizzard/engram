@@ -12,6 +12,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 - Trust-weighted recall (Path B from `docs/MULTI-AGENT-MEMORY-ARCHITECTURE.md` § Deliverable 2): `trust` JSONB param on `memory_recall` mapping agent → weight so mixed-agent recalls rank Claude rows higher rather than excluding the others. Deferred — Path A (filter) shipped first; revisit after live use exposes whether weights would improve outcomes.
 
+## [0.4.6] - 2026-05-06
+
+### Fixed — `019_security_hardening.sql` revised: search_path now includes `extensions`; idempotent across schema generations
+
+**Two corrections to the migration that shipped in 0.4.4 / 0.4.5.** Both surfaced by a single afternoon's field reports — a regression on the reference Mnestra project (semantic recall broken) and a divergence on three external operator installs (migration aborted mid-run on older schema generation). Re-run `019_security_hardening.sql` on existing installs to pick up the fixes; safe to re-run, it's now fully idempotent.
+
+#### A. `search_path` now includes `extensions` (fixes broken vector ops)
+
+The 0.4.4/0.4.5 version set `search_path = public, pg_catalog` on the six `memory_*` RPCs. Supabase ≥ 2024 installs pgvector in the `extensions` schema, so the `<=>` cosine-distance operator became unreachable from those RPCs after the alter — semantic recall fails with `operator does not exist: extensions.vector <=> extensions.vector`. Confirmed live against the reference Mnestra project on 2026-05-06; an external Mnestra-consuming app (a WhatsApp-based dispatch tool for a music festival) reported the regression within hours of 0.4.5 shipping.
+
+Fix: `set search_path = public, extensions, pg_catalog` on every `memory_*` and `mnestra_doctor_*` function. The doctor functions don't use vector ops, but the inclusion is harmless and keeps every Mnestra function uniform. Re-running 019 on a 0.4.4/0.4.5 install applies the corrected search_path; no need to drop and recreate functions.
+
+#### B. Schema-generation-aware (fixes mid-migration aborts on older installs)
+
+External operator report (2026-05-06): three Supabase projects on the older "memory_items-only" generation of Mnestra (only `memory_items` / `memory_relationships` / `memory_sessions` + the six `memory_*` RPCs) hit "relation does not exist" / "function does not exist" mid-migration when 0.4.4's 019 attempted to `drop policy` on `mnestra_commands` etc. and `revoke execute` on `mnestra_doctor_*`. Those tables and functions only exist on the layered-memory schema generation (`mnestra_session_memory` / `mnestra_developer_memory` / `mnestra_project_memory` / `mnestra_commands` plus the doctor probes from migration 016).
+
+Fix: every section of 019 now guards on object existence (`to_regclass`, `pg_proc` iteration). The function hardening section uses a signature-agnostic `do` block that iterates `pg_proc` and applies `revoke execute` + `alter function … set search_path` to whatever Mnestra functions actually exist on this install. The migration now runs cleanly on:
+
+- **layered-memory generation** (e.g. Josh's reference project): full fix applied
+- **memory_items-only generation** (e.g. the three external operator projects): only the function hardening applied; mnestra_*-targeting statements skipped silently
+- **mixed generation**: each statement applies to whatever exists
+
+External operator's interim signature-agnostic `do` block was the model for the new section 2/3; thanks to them for catching the divergence and shipping a working subset on their installs.
+
+#### Upgrade path
+
+- `npm install -g @jhizzard/mnestra@latest` (gets 0.4.6 + the corrected migration file).
+- Re-run the migration: `psql "$SUPABASE_DB_URL" -f $(npm root -g)/@jhizzard/mnestra/migrations/019_security_hardening.sql` or paste into Supabase Studio. Idempotent.
+- 0.4.4 deprecation pointer (set 2026-05-06) now points to 0.4.6 instead of 0.4.5; 0.4.5's deprecation pointer (newly added) also redirects to 0.4.6.
+
+#### What's NOT changed
+
+- The four hole classes 019 closes are unchanged in scope.
+- service_role keeps full EXECUTE on every Mnestra function (the revoke only targets public, anon, authenticated).
+- No schema migration; only function metadata + RLS policy + view definition changes.
+- Verified post-apply on the reference Mnestra project: zero rows from the security diagnostic, `select count(*) from memory_hybrid_search('smoke', array_fill(0::real, ARRAY[1536])::vector, 1)` returns 1 row with no operator-resolution error.
+
 ## [0.4.5] - 2026-05-06
 
 ### Changed — internal documentation hygiene
