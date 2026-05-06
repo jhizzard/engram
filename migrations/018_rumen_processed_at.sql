@@ -19,7 +19,7 @@
 --   1. Joshua's daily-driver (pre-Sprint-53; column will be added with
 --      every existing memory_sessions row at NULL → all become candidates
 --      on the first post-deploy tick, which is the desired bootstrap).
---   2. Brad's jizzard-brain (Linux SSH; same shape, same null-bootstrap).
+--   2. Linux SSH installs (same shape, same null-bootstrap).
 --   3. Fresh canonical installs (post-mig-017 schema; column added on
 --      first run, no rows to backfill).
 --   4. Re-runs (ADD COLUMN IF NOT EXISTS + CREATE INDEX IF NOT EXISTS).

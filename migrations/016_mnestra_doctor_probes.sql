@@ -27,8 +27,8 @@
 -- their grants are now wrapped in a do$$ guard that only emits them
 -- when `pg_cron` is enabled. The doctor's cron-related probes return
 -- the existing `unknown` band (Sprint 51.5 T2 already established it)
--- when the wrappers don't exist — graceful degradation. Petvetbid +
--- jizzard-brain are unaffected because both have rumen installed,
+-- when the wrappers don't exist — graceful degradation. Existing
+-- rumen-bearing installs are unaffected because both have rumen installed,
 -- which enables pg_cron via rumen's mig 002. Closes the
 -- mnestra-only-no-rumen fresh-install path.
 

@@ -1,8 +1,8 @@
 /**
  * Mnestra — `mnestra doctor` (Sprint 51.5 T2)
  *
- * Surfaces the all-zeros pattern that hid Brad's schema drift on
- * `jizzard-brain` for ~6 days (INSTALLER-PITFALLS.md ledger #13). Four
+ * Surfaces the all-zeros pattern that hid an operator schema drift
+ * for ~6 days (INSTALLER-PITFALLS.md ledger #13). Four
  * probes; each emits a green / yellow / red / unknown verdict with a
  * one-line recommendation. The CLI shell (mcp-server/index.ts) renders
  * the verdicts and sets the exit code.

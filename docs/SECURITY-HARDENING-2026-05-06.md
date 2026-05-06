@@ -1,7 +1,7 @@
 # Mnestra security hardening — 2026-05-06
 
 **Status:** Migration `019_security_hardening.sql` written, applied + verified on `the reference Mnestra project` (`REDACTED-PROJECT-REF`) on 2026-05-06, shipped in `@jhizzard/mnestra@0.4.4`. Brad-side apply still pending — manual SQL one-shot or `npm install @jhizzard/mnestra@0.4.4` + re-run install.
-**Source:** External sweep by Brad Heath (Nacho Money LLC) — flagged the same morning, observed on his `jizzard-brain tools` Supabase project (`rrzkceirgciiqgeefvbe`). Same channel that produced the termdeck-stack PUNCHLIST a day earlier.
+**Source:** External sweep by an operator running Mnestra against their own Supabase project — flagged the same morning. Same channel that produced the termdeck-stack PUNCHLIST a day earlier.
 **Cross-ref:** Global standing rule now in `~/.claude/CLAUDE.md` § *MANDATORY: Supabase RLS + privilege hygiene*. This doc is the project-scoped follow-up.
 
 ## TL;DR
@@ -202,7 +202,7 @@ restriction (`roles: ["-"]` = PUBLIC). On any Supabase project that runs Mnestra
 anyone holding the published anon key can write into these tables.
 
 This was Supabase's `lint=0024_permissive_rls_policy` flagging — observed on
-**`jizzard-brain tools`** (`rrzkceirgciiqgeefvbe`) but it's in the migration set, so every
+**a real Supabase project** but it's in the migration set, so every
 Mnestra install would inherit it unless the operator manually tightens.
 
 ## Why this matters
