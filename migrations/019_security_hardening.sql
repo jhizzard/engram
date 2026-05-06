@@ -175,5 +175,5 @@ grant select on public.mnestra_recent_activity to service_role;
 --   union all select 'PUBLIC_EXEC', proname from public_exec
 --   union all select 'MUTABLE_SEARCH_PATH', proname from mutable_path;
 --
--- Verified zero rows on petvetbid (luvvbrpaopnblvxdxwzb) on 2026-05-06.
+-- Verified zero rows on the reference Mnestra project on 2026-05-06.
 -- ====================================================================

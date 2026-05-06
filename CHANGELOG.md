@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 - Trust-weighted recall (Path B from `docs/MULTI-AGENT-MEMORY-ARCHITECTURE.md` § Deliverable 2): `trust` JSONB param on `memory_recall` mapping agent → weight so mixed-agent recalls rank Claude rows higher rather than excluding the others. Deferred — Path A (filter) shipped first; revisit after live use exposes whether weights would improve outcomes.
 
+## [0.4.5] - 2026-05-06
+
+### Changed — internal documentation hygiene
+
+- Scrubbed internal project references from CHANGELOG entries and migration comments to standardize on neutral framing in shipped artifacts. No functional changes from 0.4.4 — the security hardening migration (`019_security_hardening.sql`) and all behavior ship unchanged.
+
 ## [0.4.4] - 2026-05-06
 
 ### Security — migration `019_security_hardening.sql` — Supabase RLS + privilege hygiene
@@ -26,7 +32,7 @@ External Supabase advisor sweep by Brad Heath (Nacho Money LLC) on 2026-05-06 su
 
 - **Backward-compatibility:** zero behavior change for any Mnestra installation that follows the documented architecture (service-role writes via MCP server). If a custom installation built around anon-direct writes exists, the migration breaks it — and that's correct. The migration is idempotent (`drop policy if exists`, `revoke ... ` is no-op if already revoked, `alter function ... set search_path` is no-op if already set, `drop view if exists` + recreate is fine).
 - **Conditional guards:** the two `pg_cron`-conditional doctor probes (`mnestra_doctor_cron_runs`, `mnestra_doctor_cron_job_exists`) are wrapped in `do $$ ... $$` blocks with `pg_proc` existence checks, mirroring migration 016's conditional creation pattern.
-- **Verified on petvetbid (`luvvbrpaopnblvxdxwzb`) 2026-05-06:** post-apply diagnostic returns zero rows for all four hole classes; service-role smoke test (`select count(*) from memory_status_aggregation()`) returns 1 row as expected.
+- **Verified on the reference Mnestra project 2026-05-06:** post-apply diagnostic returns zero rows for all four hole classes; service-role smoke test (`select count(*) from memory_status_aggregation()`) returns 1 row as expected.
 
 ### Notes — operator action required
 
@@ -40,7 +46,7 @@ External Supabase advisor sweep by Brad Heath (Nacho Money LLC) on 2026-05-06 su
 
 ### Added — Sprint 51.6 T3 (TermDeck): migration 017 — `memory_sessions` schema reconciliation for the bundled session-end hook
 
-- **NEW migration `017_memory_sessions_session_metadata.sql`** reconciles canonical engram `memory_sessions` (mig 001) with the rag-system writer's richer column set so TermDeck's bundled hook (`@jhizzard/termdeck-stack@0.6.2`) can write a uniform shape on both fresh-canonical installs and Joshua's daily-driver `petvetbid` (which had been receiving rows from a now-overwritten personal hook). Adds nullable columns: `session_id text`, `summary_embedding vector(1536)`, `started_at`, `ended_at`, `duration_minutes`, `messages_count`, `facts_extracted`, `files_changed jsonb default '[]'`, `topics jsonb default '[]'`, `transcript_path text`. Idempotent (`ADD COLUMN IF NOT EXISTS`). Unique constraint on `session_id` is wrapped in a `do`-block scoped by `conrelid = 'public.memory_sessions'::regclass` (catches the case where Joshua's petvetbid already has the constraint from the rag-system bootstrap). HNSW index on `summary_embedding` + ended-at index for recency queries. Verified to apply cleanly on petvetbid in a `BEGIN ... ROLLBACK` transaction probe.
+- **NEW migration `017_memory_sessions_session_metadata.sql`** reconciles canonical engram `memory_sessions` (mig 001) with the rag-system writer's richer column set so TermDeck's bundled hook (`@jhizzard/termdeck-stack@0.6.2`) can write a uniform shape on both fresh-canonical installs and the reference Mnestra project (which had been receiving rows from a now-overwritten personal hook). Adds nullable columns: `session_id text`, `summary_embedding vector(1536)`, `started_at`, `ended_at`, `duration_minutes`, `messages_count`, `facts_extracted`, `files_changed jsonb default '[]'`, `topics jsonb default '[]'`, `transcript_path text`. Idempotent (`ADD COLUMN IF NOT EXISTS`). Unique constraint on `session_id` is wrapped in a `do`-block scoped by `conrelid = 'public.memory_sessions'::regclass` (catches the case where the reference project already has the constraint from the rag-system bootstrap). HNSW index on `summary_embedding` + ended-at index for recency queries. Verified to apply cleanly on the reference project in a `BEGIN ... ROLLBACK` transaction probe.
 
 ### Notes
 

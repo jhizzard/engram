@@ -8,7 +8,7 @@
 --
 -- Idempotent: safe to re-run.
 --
--- Pre-existing state (verified against petvetbid 2026-04-27 17:25 ET):
+-- Pre-existing state (verified against the reference Mnestra project 2026-04-27 17:25 ET):
 --   memory_relationships has 749 live edges. The migration adds nullable
 --   columns and a wider CHECK; no existing row violates the new constraint.
 --

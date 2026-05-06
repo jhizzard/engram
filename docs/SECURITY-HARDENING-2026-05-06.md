@@ -1,6 +1,6 @@
 # Mnestra security hardening — 2026-05-06
 
-**Status:** Migration `019_security_hardening.sql` written, applied + verified on `petvetbid` (`luvvbrpaopnblvxdxwzb`) on 2026-05-06, shipped in `@jhizzard/mnestra@0.4.4`. Brad-side apply still pending — manual SQL one-shot or `npm install @jhizzard/mnestra@0.4.4` + re-run install.
+**Status:** Migration `019_security_hardening.sql` written, applied + verified on `the reference Mnestra project` (`REDACTED-PROJECT-REF`) on 2026-05-06, shipped in `@jhizzard/mnestra@0.4.4`. Brad-side apply still pending — manual SQL one-shot or `npm install @jhizzard/mnestra@0.4.4` + re-run install.
 **Source:** External sweep by Brad Heath (Nacho Money LLC) — flagged the same morning, observed on his `jizzard-brain tools` Supabase project (`rrzkceirgciiqgeefvbe`). Same channel that produced the termdeck-stack PUNCHLIST a day earlier.
 **Cross-ref:** Global standing rule now in `~/.claude/CLAUDE.md` § *MANDATORY: Supabase RLS + privilege hygiene*. This doc is the project-scoped follow-up.
 
@@ -140,7 +140,7 @@ commit;
 --    where n.nspname = 'public' and p.proname like 'memory_%';
 ```
 
-> **Caveat — function signatures.** The `alter function` block uses my best guess at the argument lists from migration files; before shipping, verify exact signatures against the live `pg_proc` shape on a Mnestra project. If any signature in our codebase drifted, the ALTER errors and the migration aborts cleanly (txn-wrapped). Do **not** publish `019` without doing the signature verification pass on at least one live Mnestra project (e.g. petvetbid).
+> **Caveat — function signatures.** The `alter function` block uses my best guess at the argument lists from migration files; before shipping, verify exact signatures against the live `pg_proc` shape on a Mnestra project. If any signature in our codebase drifted, the ALTER errors and the migration aborts cleanly (txn-wrapped). Do **not** publish `019` without doing the signature verification pass on at least one live Mnestra project (e.g. the reference Mnestra project).
 
 ## Backward-compat / blast-radius analysis
 
@@ -229,5 +229,5 @@ risk shapes:
 ---
 
 **Owner:** Josh / Mnestra release.
-**Estimated effort:** 1 small sprint or fold into next maintenance release. ~1h to apply, ~30m to verify on petvetbid before publish.
+**Estimated effort:** 1 small sprint or fold into next maintenance release. ~1h to apply, ~30m to verify on the reference Mnestra project before publish.
 **Risk:** Low. Pure tightening. Service-role paths unaffected.

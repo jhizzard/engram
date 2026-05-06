@@ -49,7 +49,7 @@
 --                              by Joshua; case-sensitive word-boundary token
 --                              avoids matching unrelated "[maestro]" log
 --                              prefixes)
---     6. pvb                 — PVB, petvetbid, "pet vet bid"
+--     6. pvb                 — PVB, "pet vet bid"
 --     7. claimguard          — claimguard, gorgias-ticket-monitor,
 --                              "gorgias ticket monitor"
 --     8. dor                 — \mDOR\M, /DOR/, ~/Documents/DOR, dor.config,
@@ -234,7 +234,7 @@ BEGIN
 END $$;
 
 -- ============================================================
--- BUCKET 6 — pvb (case-insensitive PVB / petvetbid markers)
+-- BUCKET 6 — pvb (case-insensitive content markers — see code below)
 --
 -- Same pattern as 011 bucket 4. PVB is small in the chopin-nashville bucket
 -- (Sprint 39 dry-run found 7 rows; live apply landed 3 because bucket 1

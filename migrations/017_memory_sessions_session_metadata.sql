@@ -3,7 +3,7 @@
 -- Sprint 51.6 T3 (TermDeck v1.0.2 hotfix wave). Brings the canonical engram
 -- memory_sessions schema in line with the rag-system writer's column set so
 -- TermDeck's bundled session-end hook can write a uniform shape on both
--- fresh-canonical installs and Joshua's daily-driver petvetbid (where the
+-- fresh-canonical installs and Joshua's daily-driver the reference Mnestra project (where the
 -- columns were already added by hand when rag-system bootstrap ran).
 --
 -- Why: until v1.0.2 the bundled hook only wrote memory_items. The actual
@@ -17,7 +17,7 @@
 -- the schema it expects exists everywhere.
 --
 -- Idempotent — safe on:
---   1. petvetbid (where these columns are already present from hand-applied
+--   1. the reference Mnestra project (where these columns are already present from hand-applied
 --      DDL Joshua ran when setting up rag-system; the IF NOT EXISTS guards
 --      no-op on every column).
 --   2. Fresh canonical installs that ran migrations 001-016 only (the canonical
@@ -26,11 +26,11 @@
 --
 -- The unique constraint on session_id is wrapped in a do-block because
 -- ADD CONSTRAINT does not support IF NOT EXISTS in PostgreSQL. Joshua's
--- petvetbid already has the constraint as memory_sessions_session_id_key
+-- the reference Mnestra project already has the constraint as memory_sessions_session_id_key
 -- (auto-named by the rag-system bootstrap); this block detects that name
 -- and skips re-adding.
 --
--- session_id is added NULLABLE on canonical installs even though petvetbid's
+-- session_id is added NULLABLE on canonical installs even though the reference Mnestra project's
 -- existing constraint is NOT NULL. Adding NOT NULL via ALTER TABLE on a
 -- table with existing rows would fail; the bundled hook always supplies
 -- session_id at write time, so nullability is non-blocking. A future sprint
@@ -56,7 +56,7 @@ alter table public.memory_sessions
 -- Unique constraint on session_id. Skip if any unique constraint on
 -- (session_id) is already in place — covers both the canonical name
 -- memory_sessions_session_id_key and any alternate name from a manual
--- ALTER TABLE Joshua may have run on petvetbid.
+-- ALTER TABLE Joshua may have run on the reference Mnestra project.
 do $$
 declare
   has_unique boolean;

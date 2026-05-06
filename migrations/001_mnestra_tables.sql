@@ -79,8 +79,8 @@ create index if not exists memory_relationships_target_idx on memory_relationshi
 -- ── match_memories helper RPC ─────────────────────────────────────────────
 -- Used by remember.ts (dedup) and consolidate.ts (cluster seeding).
 --
--- Sprint 52.1 — signature-drift guard. On long-lived v0.6.x-era installs
--- (Joshua's petvetbid, Brad's jizzard-brain), match_memories was created by
+-- Sprint 52.1 — signature-drift guard. On long-lived v0.6.x-era installs,
+-- match_memories was created by
 -- a prior Mnestra version with a different RETURN-table column shape:
 --   (id, content, metadata, source_type, category, project, created_at, similarity)
 -- vs the canonical:

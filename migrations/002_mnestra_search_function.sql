@@ -16,7 +16,7 @@
 -- Sprint 51.9 — signature-drift guard. Same Class A pattern Sprint 52.1
 -- closed for `match_memories` (mig 001:81-95). Codex T4 surfaced the cousin
 -- 2026-05-04 14:42 ET during Sprint 51.5b dogfood: long-lived v0.6.x-era
--- installs (Joshua's petvetbid, likely Brad's jizzard-brain) ALSO have a
+-- installs ALSO have a
 -- 10-arg drift overload of `memory_hybrid_search` coexisting with the
 -- canonical 8-arg signature. The drift overload carries the never-shipped
 -- `recency_weight`/`decay_days` parameters from a pre-canonical Mnestra

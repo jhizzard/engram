@@ -103,7 +103,7 @@ grant execute on function mnestra_doctor_vault_secret_exists(text)        to ser
 --
 -- Idempotent: do$$ runs every replay; CREATE OR REPLACE keeps the
 -- function definitions in sync if pg_cron later gets enabled and the
--- migration re-runs. Existing installs (petvetbid, jizzard-brain) have
+-- migration re-runs. Existing installs typically have
 -- pg_cron from Rumen's install path and emit these unconditionally.
 
 do $cron_guard$
