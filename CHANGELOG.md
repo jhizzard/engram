@@ -12,6 +12,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 - Trust-weighted recall (Path B from `docs/MULTI-AGENT-MEMORY-ARCHITECTURE.md` § Deliverable 2): `trust` JSONB param on `memory_recall` mapping agent → weight so mixed-agent recalls rank Claude rows higher rather than excluding the others. Deferred — Path A (filter) shipped first; revisit after live use exposes whether weights would improve outcomes.
 
+## [0.4.4] - 2026-05-06
+
+### Security — migration `019_security_hardening.sql` — Supabase RLS + privilege hygiene
+
+External Supabase advisor sweep by Brad Heath (Nacho Money LLC) on 2026-05-06 surfaced four hole classes that shipped silently in every Mnestra-bearing project from 0.4.3 and earlier. None had been observed exploited; the architecture-as-documented (service-role-only writes via the MCP server) was unaffected. The holes opened on any project where the anon key leaked separately. This release closes them at the schema level so anon-key escape no longer maps to memory-corpus exploitation.
+
+- **NEW migration `019_security_hardening.sql`**:
+  1. Drops the four `Allow insert for all` PUBLIC INSERT RLS policies on `mnestra_commands`, `mnestra_developer_memory`, `mnestra_project_memory`, `mnestra_session_memory`. These were created by Supabase Studio's default-policy template at table-creation time and were inherited per-project (not in source migrations). With `WITH CHECK (true)` to PUBLIC, anyone holding the project's anon key could write directly to the memory tables — corpus poisoning and session-id squatting. Service-role writes are unaffected (RLS bypass).
+  2. Revokes EXECUTE from `public`, `anon`, `authenticated` on every Mnestra function (5 `mnestra_doctor_*` SECURITY DEFINER probes + 6 `memory_*` RPCs). Postgres defaults function EXECUTE to PUBLIC; the explicit `grant ... to service_role` in earlier migrations is additive, not exclusive. `mnestra_doctor_vault_secret_exists` was the highest-priority fix — anon-callable secret-existence enumeration via the function-owner's privileges.
+  3. Pins `search_path = public, pg_catalog` on all 11 functions. Closes Supabase lint 0011 (`function_search_path_mutable`); mitigates SECURITY DEFINER shadow-attack vectors.
+  4. Recreates `mnestra_recent_activity` view without `SECURITY DEFINER` and revokes anon/authenticated SELECT (Supabase lint 0010). The view UNIONs all three memory layers and was exposing a 100-row anon-readable window into the entire corpus — direct exfiltration path for any anon-key holder. service_role keeps SELECT.
+
+- **Backward-compatibility:** zero behavior change for any Mnestra installation that follows the documented architecture (service-role writes via MCP server). If a custom installation built around anon-direct writes exists, the migration breaks it — and that's correct. The migration is idempotent (`drop policy if exists`, `revoke ... ` is no-op if already revoked, `alter function ... set search_path` is no-op if already set, `drop view if exists` + recreate is fine).
+- **Conditional guards:** the two `pg_cron`-conditional doctor probes (`mnestra_doctor_cron_runs`, `mnestra_doctor_cron_job_exists`) are wrapped in `do $$ ... $$` blocks with `pg_proc` existence checks, mirroring migration 016's conditional creation pattern.
+- **Verified on petvetbid (`luvvbrpaopnblvxdxwzb`) 2026-05-06:** post-apply diagnostic returns zero rows for all four hole classes; service-role smoke test (`select count(*) from memory_status_aggregation()`) returns 1 row as expected.
+
+### Notes — operator action required
+
+- **Existing installations must apply 019.** `npm install @jhizzard/mnestra@0.4.4` ships the new migration file, but applying it is the operator's responsibility (Mnestra historically applies migrations via direct `psql` or via the `@jhizzard/termdeck-stack` audit-upgrade probe, not via Supabase CLI migrations). Two paths:
+  - **Via stack-installer**: re-run `termdeck init --mnestra` (or whatever the current upgrade command is); audit-upgrade probes 019 and applies on Y-confirm.
+  - **Manually**: `psql "$SUPABASE_DB_URL" -f migrations/019_security_hardening.sql`, or paste the migration body into Supabase Studio's SQL editor. Use the `BEGIN ... ROLLBACK` shape to dry-run first.
+- **Post-apply verification** is included as a comment block at the bottom of the migration file. Run it in Studio after applying — should return zero rows.
+- **The standing rule lives in the global Claude Code instructions** (`~/.claude/CLAUDE.md` § *MANDATORY: Supabase RLS + privilege hygiene*) — same four gates apply to every Supabase-touching project, every release.
+
 ## [0.4.2] - 2026-05-04
 
 ### Added — Sprint 51.6 T3 (TermDeck): migration 017 — `memory_sessions` schema reconciliation for the bundled session-end hook
