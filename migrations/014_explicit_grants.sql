@@ -17,9 +17,9 @@
 -- PostgREST checks table-level privileges before evaluating RLS, so
 -- service_role's bypassrls attribute does not help.
 --
--- Reported and root-caused by Brad Heath 2026-04-28 against project
--- ref rrzkceirgciiqgeefvbe; fix verified end-to-end on his install
--- before being upstreamed here.
+-- Reported and root-caused by Brad Heath 2026-04-28 against his Mnestra
+-- project; fix verified end-to-end on his install before being upstreamed
+-- here.
 --
 -- This migration is idempotent and safe on greenfield projects where
 -- the auto-grant default already fired (the GRANTs become no-ops).
