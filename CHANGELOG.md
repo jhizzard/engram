@@ -12,6 +12,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `mnestra doctor` subcommand — runs `select 1 from memory_items limit 0` (catches GRANT issues), an embedding ping, and an RPC probe; prints a green/red checklist. (Brad's third upstream suggestion 2026-04-28; deferred from 0.3.2.)
 - Trust-weighted recall (Path B from `docs/MULTI-AGENT-MEMORY-ARCHITECTURE.md` § Deliverable 2): `trust` JSONB param on `memory_recall` mapping agent → weight so mixed-agent recalls rank Claude rows higher rather than excluding the others. Deferred — Path A (filter) shipped first; revisit after live use exposes whether weights would improve outcomes.
 
+## [0.4.9] - 2026-05-08
+
+> **Sprint 62 — Mnestra session-end coverage gap.** 3+1+1 with Codex auditor; ~80 min from inject (20:34 ET) to FINAL-VERDICT GREEN (21:54 ET). T4-CODEX caught and routed 9 audit concerns (8 resolved in flight; 1 RED block on T1 cleared in re-audit). This release **bundles the 0.4.8 ws-polyfill that was queued earlier the same day** with the Sprint 62 work; single ship for Brad's Node 20 P1 + the migration + recall additions. Version 0.4.8 was staged but never published — rolled into 0.4.9 to keep the publish wave to a single bump. **Pre-publish fold-in 2026-05-11:** EADDRINUSE singleton-collision catch in `webhook-server` (Brad's 2026-05-11 r730 report — 42,426 crashes over 5d 7h from a single uncaught listen failure).
+
+### Fixed — Webhook server EADDRINUSE catch — no more 5/min crash storm on double-spawn
+
+External operator report (Brad Heath, R730 / Nacho Money LLC, 2026-05-11): `mnestra serve` had no `'error'` handler attached to its HTTP `Server` instance before `server.listen()`. When a fresh `mnestra serve` was spawned while a prior singleton already held port 37778, the synchronous EADDRINUSE error went uncaught, the `Server` instance emitted `'error'` with no listener, and node aborted with the full stack trace. On Brad's box a stale singleton (PID 1420909, bound since 2026-05-05 18:45 UTC) had survived across days while every fresh Claude-MCP autostart crashed on bind — **42,426 crashes over 5 days, log inflated to 21 MB / 509,114 lines (~83% pure stack trace)**.
+
+Fix (`src/webhook-server.ts:308`): attach `server.on('error', …)` BEFORE `server.listen()`. On `EADDRINUSE` emit a single friendly stderr line (`[mnestra-webhook] port ${port} already bound — another \`mnestra serve\` is running. Exiting 0.`) and `process.exit(0)` so MCP-startup logs aren't full of red. Other error codes re-throw to preserve the prior fail-loud semantics for unexpected failure modes.
+
+This is the minimum patch. Brad's full ask list (pre-listen singleton probe / pidfile, log rotation, attach-to-existing on autostart) is queued for the next Mnestra release alongside TermDeck Sprint 63 = Wave 2.
+
+### Fixed — Node <22 WebSocket polyfill — `RealtimeClient` constructor failure on Node 18/20 LTS
+
+External operator report (Brad Heath, Nacho Money LLC, 2026-05-08): every `memory_*` MCP call on Node 20 LTS fails at `RealtimeClient` constructor time with the verbatim error:
+
+> `Error: Node.js 20 detected without native WebSocket support.`
+>
+> Suggested solution: For Node.js < 22, install `ws` package and provide it via the transport option:
+> ```ts
+> import ws from "ws";
+> new RealtimeClient(url, { transport: ws });
+> ```
+
+Root cause: `@supabase/realtime-js` (transitive dependency of `@supabase/supabase-js`) requires a global `WebSocket` constructor. Node ≥22 ships native `WebSocket`; Node 18/20 LTS do not. Mnestra's Supabase client factory (`src/db.ts`) didn't supply a transport, so the constructor threw before any network I/O. The data layer (REST, webhooks, pgvector store) was unaffected — only the Realtime/MCP surface was dead. Brad worked around it for two days by reading the on-disk memory substrate directly and queueing writes to `MNESTRA_PENDING_NOTE.md` files.
+
+Fix (`src/db.ts`): detect Node version at runtime via `globalThis.WebSocket` presence. On Node ≥22 leave `realtime` unconfigured (native path). On Node <22 lazy-load `ws` via `createRequire(import.meta.url)` and pass it through `realtime.transport`. If `ws` is missing on Node <22, log a single warning pointing to `npm install -g ws` and continue (Realtime still dead, but the rest of the client works — better than the prior hard-throw).
+
+`ws` is declared as `optionalDependency`, not `dependency`: Node ≥22 operators don't pay the install cost, and `npm install --no-optional` flows still succeed on Node <22 (with the documented warning). `@types/ws` lands in `devDependencies` for the build.
+
+### Added — Migration `021_project_tag_canonicalize_claimguard.sql` — finishes Sprint 21 T2 rename
+
+Sprint 62 T2. Same project tagged three ways across history split filtered recall: `claimguard` 32 rows + `gorgias` 541 rows + `gorgias-ticket-monitor` 245 rows = 818 total, but `memory_recall(project="claimguard")` reached only the 32 newest. Sprint 21 T2's planned rename was scoped-out and never landed; migration `012_project_tag_re_taxonomy.sql:19-25` documented the deferral.
+
+Migration `021_project_tag_canonicalize_claimguard.sql` does a single-statement project-column UPDATE wrapped in BEGIN/COMMIT with BEFORE/AFTER audit DO blocks and a post-update conservation check that `RAISE EXCEPTION`s if any legacy tag survives. Idempotent: re-apply affects 0 rows.
+
+Verified live against the reference Mnestra project: post-apply `[{"project":"claimguard","n":818}]` (legacy tags zero); conservation exact (32+541+245=818); `memory_recall(project="claimguard")` returns the full historical corpus across the eras (Master Execution Plan 2026-03-12, ownership lock 2026-04-23, HBC-CRC architectural North Star 2026-04-26, Diagnostic Adversarial Orchestrator Suite 2026-05-07).
+
+T4-CODEX live-rollback audit AUDIT-OK at 20:40 ET; integrated AUDIT-OK at 20:57 ET after T2 unblocked the loader-precedence regression. The previously-deferred ClaimGuard project-tag invariant test (`tests/project-tag-invariant.test.js`) is un-deferred and now passes.
+
+### Added — Migration `022_source_agent_backfill.sql` — predicate-based historical `source_agent` backfill
+
+Sprint 62 T3. Sprint 50 introduced `source_agent`. `memory_recall(source_agents=...)` silently excludes NULL-source rows per its own docstring contract. Empirical survey via T3 sampling: **6,381 of 6,483 rows (~98% of corpus)** had NULL source_agent; filtered recall was blind to the entire pre-Sprint-50 history — far above the SOURCE-BRIEF's "3,000+" estimate.
+
+Three predicate-based backfills using row-shape attribution (T3's 20:48 finding showed marker-based predicates would have falsely tagged Claude rows describing other agents):
+
+- **A** — NULL + decision/bug_fix/architecture/preference/code_context (560 rows) → `'claude'`. Architectural lock: pre-Sprint-50 only Claude shipped a `memory_remember` client; Codex/Gemini/Grok wiring landed Sprint 51+.
+- **B** — NULL + fact + `source_session_id IS NOT NULL` (4,587 rows) → `'claude'`. Schema fingerprint: source_session_id is the Claude SessionEnd hook's UUID — identical shape to existing claude/session_summary tagged rows.
+- **D** — NULL + document_chunk (951 rows) → `'orchestrator'`. Structural fingerprint: 951/951 rows carry `source_file_path` + `chunkIndex`/`heading` metadata — unmistakable rag-system batch-chunker output.
+
+**Predicate C deliberately NOT applied** per T4-CODEX's 20:43 provenance-preservation concern: 283 rows of fact-without-session-without-path. No architectural/schema lock that PREVENTS non-Claude origin (manual psql, non-MCP REST, early rag-extractor variant). Migration `015_source_agent.sql:24-30`'s "no clean single-agent attribution" bright line preserved.
+
+Post-apply (BEGIN/ROLLBACK live verification): residual NULL = 283 / 6,483 = **4.36%** — under the < 5% acceptance target.
+
+### Added — `include_null_source` flag in `memory_recall`
+
+Sprint 62 T3 optional surface, T4-recommended. New `include_null_source: boolean` field on `RecallInput`, default `false` (preserves Sprint 50 silent-drop semantics). When `true`, NULL-source rows are returned even when `source_agents=[...]` is supplied — opens a path to recover the deliberately-preserved 283 fact rows from migration 022 Predicate C.
+
+Implementation: `src/types.ts:114-126` adds the field; `src/recall.ts:111` parses it; `:166-172` updates the filter branch (`if (!agent) return includeNullSource;`). MCP wrapper `mcp-server/index.ts:280-285` adds the zod schema entry; `:292-298` forwards through to `memoryRecall`. Three new tests at `tests/recall-source-agent.test.ts:225-280` exercise true / explicit-false / no-filter cases.
+
+### Verification
+
+- `npm test`: **70/70 pass** (was 67/67 baseline; +3 new include_null_source tests). Build green.
+- Live DB after 021 apply: `claimguard=818` rows, legacy tags zero, conservation exact.
+- 022 verified via BEGIN/ROLLBACK only (T3's discipline). Will apply on first `termdeck init --mnestra` post-publish via the Sprint 61 migration tracker; or operator can apply directly via `psql -f migrations/022_source_agent_backfill.sql`.
+
+### Upgrade path
+
+- `npm install -g @jhizzard/mnestra@latest`
+- On Node 20 LTS: confirm `ws` was picked up by the optionalDeps install (`npm ls -g ws`); if missing, `npm install -g ws` explicitly.
+- On Node ≥22 LTS: nothing extra; native `WebSocket` is used.
+- For 022: new TermDeck installs running `termdeck init --mnestra` after `@jhizzard/termdeck@1.1.1` ships will auto-apply 022 via the migration tracker. Existing installs can apply manually: `psql "$SUPABASE_DB_URL" -f migrations/022_source_agent_backfill.sql`. Idempotent.
+
+### What's NOT changed
+
+- Existing `memory_recall` default semantics — `include_null_source` defaults to `false`.
+- Predicate C residual (283 rows) — provenance uncertainty intentionally preserved per migration 015's bright line.
+- service_role keeps full EXECUTE on every Mnestra function.
+- Existing 0.4.6/0.4.7 RPC behavior unchanged.
+- The `optionalDependencies` declaration is purely additive — operators who don't need `ws` (Node ≥22) see no behavior change.
+
 ## [0.4.6] - 2026-05-06
 
 ### Fixed — `019_security_hardening.sql` revised: search_path now includes `extensions`; idempotent across schema generations

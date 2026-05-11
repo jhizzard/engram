@@ -305,6 +305,16 @@ export function startWebhookServer(opts: WebhookServerOptions = {}): Server {
     }
   });
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[mnestra-webhook] port ${port} already bound — another \`mnestra serve\` is running. Exiting 0.`
+      );
+      process.exit(0);
+    }
+    throw err;
+  });
+
   server.listen(port, () => {
     console.error(`[mnestra-webhook] listening on :${port}`);
   });

@@ -7,8 +7,34 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createRequire } from 'node:module';
 
 let cached: SupabaseClient | null = null;
+
+// Node 18/20 LTS don't ship native WebSocket. @supabase/realtime-js's
+// RealtimeClient throws "Node.js 20 detected without native WebSocket support"
+// at constructor time when no transport is supplied — every memory_* MCP call
+// fails before any network I/O. Brad reported this from his R730 (Node 20.20.2)
+// on 2026-05-08; ws was not installed and the entire MCP surface was dead.
+//
+// On Node <22 we lazy-load 'ws' (declared as optionalDependency so installs
+// succeed on Node ≥22 without it) and pass it through realtime.transport.
+// On Node ≥22 globalThis.WebSocket exists and we leave realtime unconfigured.
+function getWsTransport(): unknown | undefined {
+  if (typeof (globalThis as { WebSocket?: unknown }).WebSocket !== 'undefined') {
+    return undefined;
+  }
+  try {
+    const req = createRequire(import.meta.url);
+    return req('ws');
+  } catch {
+    console.warn(
+      '[mnestra] Node <22 detected without native WebSocket and the optional "ws" package is not installed. ' +
+        'Realtime transport may fail. Install with: npm install -g ws'
+    );
+    return undefined;
+  }
+}
 
 export function getSupabase(): SupabaseClient {
   if (cached) return cached;
@@ -23,8 +49,13 @@ export function getSupabase(): SupabaseClient {
     throw new Error('Mnestra: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   }
 
+  const wsTransport = getWsTransport();
+
   cached = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
+    ...(wsTransport
+      ? { realtime: { transport: wsTransport as never } }
+      : {}),
   });
 
   return cached;

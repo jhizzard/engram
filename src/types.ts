@@ -109,9 +109,20 @@ export interface RecallInput {
    * Filter results by the source agent that produced each row. Omit (or
    * pass an empty array) for no filter — the default, returns all agents.
    * When set, rows with NULL source_agent (historical, pre-Sprint-50 except
-   * the backfilled session_summary rows) are excluded.
+   * the backfilled session_summary rows) are excluded — unless
+   * include_null_source is set true.
    */
   source_agents?: string[] | null;
+  /**
+   * Sprint 62 T3: when true, rows with NULL source_agent pass the
+   * source_agents filter alongside agent-matched rows. Default false
+   * preserves the Sprint 50 silent-drop semantics. Use true to recover
+   * the residual NULL slice (bare-call fact rows, etc.) that migration
+   * 022 deliberately left NULL per migration 015's provenance bright
+   * line. No effect when source_agents is omitted (NULL rows already
+   * pass an unfiltered query).
+   */
+  include_null_source?: boolean;
 }
 
 export interface RecallHit {

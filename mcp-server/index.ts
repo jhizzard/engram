@@ -253,7 +253,7 @@ server.registerTool(
   {
     title: 'Recall',
     description:
-      'Smart retrieval of relevant memories. Returns concise, deduplicated results within a token budget. Prioritizes decisions and bug fixes over raw document chunks. Always returns at least min_results hits when available. Omit project to search across ALL projects. Optionally filter by source_agents to recall only rows produced by specific LLMs (claude/codex/gemini/grok/orchestrator).',
+      'Smart retrieval of relevant memories. Returns concise, deduplicated results within a token budget. Prioritizes decisions and bug fixes over raw document chunks. Always returns at least min_results hits when available. Omit project to search across ALL projects. Optionally filter by source_agents to recall only rows produced by specific LLMs (claude/codex/gemini/grok/orchestrator); set include_null_source=true to also include historical rows whose authoring agent is unknown.',
     inputSchema: {
       query: z.string().describe('What to search for in memory'),
       project: z
@@ -274,11 +274,17 @@ server.registerTool(
         .array(z.enum(['claude', 'codex', 'gemini', 'grok', 'orchestrator']))
         .optional()
         .describe(
-          'Filter to memories produced by specific source agents. Omit (or empty array) for all agents. NULL-source-agent rows (historical, pre-Sprint-50) are excluded when this filter is set.'
+          'Filter to memories produced by specific source agents. Omit (or empty array) for all agents. NULL-source-agent rows (historical, pre-Sprint-50, plus the residual slice migration 022 deliberately left NULL) are excluded by default when this filter is set; pass include_null_source=true to include them.'
+        ),
+      include_null_source: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, NULL-source-agent rows pass the source_agents filter alongside agent-matched rows. Default false preserves the Sprint 50 silent-drop semantics. No effect when source_agents is omitted.'
         ),
     },
   },
-  async ({ query, project, token_budget, min_results, source_agents }) => {
+  async ({ query, project, token_budget, min_results, source_agents, include_null_source }) => {
     try {
       const out = await memoryRecall({
         query,
@@ -286,6 +292,7 @@ server.registerTool(
         token_budget: token_budget || 2000,
         min_results: min_results || 5,
         source_agents: source_agents ?? null,
+        include_null_source: include_null_source === true,
       });
       return { content: [{ type: 'text' as const, text: out.text }] };
     } catch (err) {

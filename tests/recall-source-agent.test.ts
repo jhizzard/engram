@@ -221,3 +221,59 @@ test('empty RPC result short-circuits without a follow-up batch lookup', async (
   assert.equal(out.hits.length, 0);
   assert.match(out.text, /No relevant memories found/);
 });
+
+// ─── Sprint 62 T3: include_null_source flag ─────────────────────────────────
+//
+// Migration 022 deliberately leaves the residual NULL slice (bare-call fact
+// rows without session/path attribution) NULL rather than speculatively
+// attributing them to 'claude'. The flag is the additive recall path that
+// callers use to recover those rows. Default-off preserves the Sprint 50
+// silent-drop contract.
+
+test('source_agents=["claude"] + include_null_source=true keeps Claude rows AND NULL rows', async () => {
+  const client = makeFakeClient(fixture);
+
+  const out = await memoryRecall(
+    { query: 'find', source_agents: ['claude'], include_null_source: true },
+    { client, generateEmbedding: fakeEmbed }
+  );
+
+  const ids = out.hits.map((h) => h.id).sort();
+  assert.deepEqual(
+    ids,
+    [
+      '00000000-0000-0000-0000-000000000001', // claude
+      '00000000-0000-0000-0000-000000000005', // historical NULL
+    ],
+    'flag opts NULL rows back into a filtered recall — exactly the union the migration-022 residual slice needs'
+  );
+});
+
+test('source_agents=["claude"] + include_null_source=false (explicit) matches default exclusion', async () => {
+  const client = makeFakeClient(fixture);
+
+  const out = await memoryRecall(
+    { query: 'find', source_agents: ['claude'], include_null_source: false },
+    { client, generateEmbedding: fakeEmbed }
+  );
+
+  assert.equal(out.hits.length, 1);
+  assert.equal(out.hits[0]!.id, '00000000-0000-0000-0000-000000000001');
+});
+
+test('include_null_source=true with source_agents omitted is a no-op (NULL rows already pass an unfiltered query)', async () => {
+  const probe: ProbeRecorder = { rpcCalls: 0, agentSelectCalls: 0, selectedIds: [] };
+  const client = makeFakeClient(fixture, probe);
+
+  const out = await memoryRecall(
+    { query: 'find', include_null_source: true },
+    { client, generateEmbedding: fakeEmbed }
+  );
+
+  assert.equal(
+    probe.agentSelectCalls,
+    0,
+    'no batch lookup should fire when filter is omitted, regardless of include_null_source'
+  );
+  assert.equal(out.hits.length, fixture.length);
+});

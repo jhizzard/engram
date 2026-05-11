@@ -108,6 +108,7 @@ export async function memoryRecall(
     Array.isArray(input.source_agents) && input.source_agents.length > 0
       ? input.source_agents
       : null;
+  const includeNullSource = input.include_null_source === true;
 
   // Over-fetch so dedup + rank have material to work with.
   const fetchCount = Math.min(Math.max(Math.floor(budget / 50), 10), 40);
@@ -162,10 +163,12 @@ export async function memoryRecall(
     );
     rows = rows.filter((r) => {
       const agent = agentMap.get(r.id);
-      // NULL source_agent means historical / unknown provenance — exclude
-      // from explicitly-filtered recall. Backfilled session_summary rows
-      // already carry source_agent='claude' via migration 015.
-      if (!agent) return false;
+      // NULL source_agent means historical / unknown provenance. Default
+      // behavior is to exclude on explicit filter (Sprint 50 contract);
+      // include_null_source=true (Sprint 62 T3) opts NULL rows back in
+      // for callers that want the residual slice migration 022
+      // deliberately left NULL.
+      if (!agent) return includeNullSource;
       return sourceAgents.includes(agent);
     });
     if (rows.length === 0) {
