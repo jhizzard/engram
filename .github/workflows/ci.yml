@@ -39,6 +39,43 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+      - name: Provision Supabase platform objects
+        # Mnestra's migrations target a Supabase database. Supabase provides
+        # the anon / authenticated / service_role roles and the Vault schema;
+        # a vanilla pgvector/pgvector:pg16 container has neither. Migrations
+        # 006/010/014/019/020 GRANT/REVOKE against those roles, and migration
+        # 016's mnestra_doctor_vault_secret_exists is a `language sql` function
+        # whose body is parse-time-resolved at CREATE, so vault.secrets must
+        # exist. Pre-create both so the migrations apply exactly as they do on
+        # Supabase. (016's cron.* probes are self-guarded behind a pg_cron
+        # pg_extension check, so no cron shim is needed.) IF NOT EXISTS keeps
+        # the step re-runnable.
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d mnestra_test -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+              CREATE ROLE anon NOLOGIN;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+              CREATE ROLE authenticated NOLOGIN;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+              CREATE ROLE service_role NOLOGIN BYPASSRLS;
+            END IF;
+          END
+          $$;
+
+          CREATE SCHEMA IF NOT EXISTS vault;
+          CREATE TABLE IF NOT EXISTS vault.secrets (
+            id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            name       text UNIQUE,
+            secret     text,
+            created_at timestamptz NOT NULL DEFAULT now()
+          );
+          SQL
       - name: Apply migrations in order
         env:
           PGPASSWORD: postgres
